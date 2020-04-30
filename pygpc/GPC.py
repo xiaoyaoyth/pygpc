@@ -29,6 +29,18 @@ class GPC(object):
     """
     General gPC base class
 
+    Parameters
+    ----------
+    problem: Problem class instance
+        GPC Problem under investigation
+    options : dict
+        Options of gPC algorithm
+    validation: ValidationSet object (optional)
+        Object containing a set of validation points and corresponding solutions. Can be used
+        to validate gpc approximation setting options["error_type"]="nrmsd".
+        - grid: Grid object containing the validation points (grid.coords, grid.coords_norm)
+        - results: ndarray [n_grid x n_out] results
+
     Attributes
     ----------
     problem: Problem class instance
@@ -84,18 +96,6 @@ class GPC(object):
     def __init__(self, problem, options, validation=None):
         """
         Constructor; Initializes GPC class
-
-        Parameters
-        ----------
-        problem: Problem class instance
-            GPC Problem under investigation
-        options : dict
-            Options of gPC algorithm
-        validation: ValidationSet object (optional)
-            Object containing a set of validation points and corresponding solutions. Can be used
-            to validate gpc approximation setting options["error_type"]="nrmsd".
-            - grid: Grid object containing the validation points (grid.coords, grid.coords_norm)
-            - results: ndarray [n_grid x n_out] results
         """
         # objects
         self.problem = problem
@@ -260,7 +260,7 @@ class GPC(object):
         elif self.backend == "cuda":
             try:
                 from .pygpc_extensions_cuda import create_gpc_matrix_cuda
-            except (ImportError, ModuleNotFoundError):
+            except (ImportError):
                 raise NotImplementedError("The CUDA-extension is not installed. Use the build script to install.")
             else:
                 if not gradient:
@@ -351,8 +351,11 @@ class GPC(object):
 
         # else:
         # perform manual loocv without gradient
+
+
         matrix = self.gpc_matrix
         results_complete = results
+
 
         n_loocv = 25
 
@@ -944,6 +947,15 @@ class GPC(object):
             results_complete = np.vstack((results, ten2mat(gradient_results)))
         else:
             results_complete = results
+
+            
+        if(isinstance(self.grid, L1OPT)):
+            a = 1 / np.linalg.norm(matrix)
+            matrix = a * matrix
+            results_complete = a * results_complete
+
+        self.coherence_matrix = matrix
+
 
         #################
         # Moore-Penrose #
