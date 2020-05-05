@@ -1488,6 +1488,11 @@ class LHS(RandomGrid):
         .. [1] McKay, M. D., Beckman, R. J., & Conover, W. J. (2000). A comparison of three methods for selecting
            values of input variables in the analysis of output from a computer code. Technometrics, 42(1), 55-61.
         """
+        if crit is not None:
+            if len(crit) is 2:
+                self.split = crit[1]
+                crit = crit[0]
+
         if random_state is None:
             random_state = np.random.RandomState()
         elif not isinstance(random_state, np.random.RandomState):
@@ -1691,21 +1696,58 @@ class LHS(RandomGrid):
                     T = 0.9 * T
         return P_best
 
+    # def ese_mu(self, dim, n):
+    #     # self.split = self.options[1]
+    #     n_ese = int(self.split*n)
+    #     n_mu = n - n_ese
+    #     design_ese = self.lhs_ese(dim, n)
+    #     design = design_ese[:n_ese, :]
+    #     idxs = []
+    #     for i in range(n_mu):
+    #         # if (n_mu - i) > 0:
+    #         mu_vals = []
+    #         idx_list = []
+    #         # temp = design_ese[:(n_ese + i), :]
+    #         bes = [k for k in range(n_mu) if k not in idxs]
+    #         bel = 1
+    #         for j in [k for k in range(n_mu) if k not in idxs]:
+    #             a = np.vstack((design, design_ese[j + n_ese]))
+    #             mu_vals.append(mutual_coherence(a))
+    #             idx_list.append(j)
+    #             mu_array = np.array(mu_vals)
+    #         idx_best = idx_list[np.argmin(mu_array)]
+    #         idxs.append(idx_best)
+    #         design = np.vstack((design, design_ese[idx_best + n_ese]))
+    #         # else:
+    #         #     design = np.vstack((design, design_ese[n-1]))
+    #     return design
+
+
     def ese_mu(self, dim, n):
-        self.split = self.options[1]
         n_ese = int(self.split*n)
         n_mu = n - n_ese
-        design_ese = self.lhs_ese(dim, n)
-        design = design_ese
+        if(n_ese < 1):
+            n_mu = n_mu - 1
+            design = np.random.rand(1, dim)
+        elif(n_ese is 1):
+            design = np.random.rand(1, dim)
+        else:
+            design = self.lhs_ese(dim, n_ese)
+        design_rand = np.random.rand(n_mu, dim)
+        idxs = []
         for i in range(n_mu):
-            mu_vals = np.array(n_mu - i)
-            temp = design_ese[(n_ese + i):, :]
-            for j in range(n_mu - i):
-                mu_vals[j] = mutual_coherence(design_ese[n_ese + i, :])
-            idx_best = np.argmin(mu_vals) + n_ese
-        design = np.vstack((design, design_ese[idx_best]))
-        return design
+            mu_vals = []
+            idx_list = []
+            for j in [k for k in range(n_mu) if k not in idxs]:
+                a = np.vstack((design, design_rand[j]))
+                mu_vals.append(mutual_coherence(a))
+                idx_list.append(j)
+            mu_array = np.array(mu_vals)
+            idx_best = idx_list[np.argmin(mu_array)]
+            idxs.append(idx_best)
+            design = np.vstack((design, design_rand[idx_best]))
 
+        return design
 class MCMC(RandomGrid):
     """
     LHS grid object
@@ -1822,6 +1864,13 @@ class MCMC(RandomGrid):
 
     def Metropolis_Hastings(self):
 
+        def f(x):
+            return 1
+        def w(x):
+            return 1
+        def g(x):
+            return 1
+
         n = max(2 * self.n_grid, 10000)
         # draw n samples from the proposal distribution
         samples = np.random.beta(.5, .5, size=[n, self.dim])
@@ -1927,6 +1976,7 @@ class L1OPT(RandomGrid):
                                    coords_gradient_id=coords_gradient_id)
 
         self.factor = 10
+        self.n_grid = self.factor * self.n_grid
 
         self.coords_reservoir = np.zeros((self.n_grid, self.dim))
         self.coords_norm_reservoir = np.zeros((self.n_grid, self.dim))
@@ -1935,8 +1985,9 @@ class L1OPT(RandomGrid):
         # Generate random samples for each random input variable [n_grid x dim]
         self.coords_norm = np.zeros([self.n_grid, self.dim])
 
-        # generate L1OPT Grid
-        self.lhs_reservoir = self.get_pool_samples()
+        # generate Samples
+        # self.lhs_reservoir = self.get_pool_samples()
+        self.lhs_reservoir = np.random.rand(self.n_grid, self.dim)
 
         # transform sample points from icdf to pdf space
         for i_p, p in enumerate(self.parameters_random):
@@ -1958,6 +2009,8 @@ class L1OPT(RandomGrid):
         # Generate unique IDs of grid points
         self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
 
+        self.n_grid = self.n_grid / self.factor
+
     def get_pool_samples(self, gpc):
 
         def t_averaged_mutual_coherence(array, t=0.2):
@@ -1974,14 +2027,14 @@ class L1OPT(RandomGrid):
         index_list = []
 
         # create psy pool
-        psy_pool = gpc.create_gpc_matrix(gpc.b.basis, self.coords_norm, gradient=False,)
+        psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.coords_norm, gradient=False)
         # weight psy pool with the weighting matrix
         normalization_factor = 1 / np.linalg.norm(psy_pool)
         psy_pool = normalization_factor * psy_pool
 
         # m is number of needed samples, m_p number of rows in pool matrix
-        m = int(np.shape(array)[0] / self.factor)
-        m_p = int(np.shape(array)[0])
+        m = int(np.shape(psy_pool)[0] / self.factor)
+        m_p = int(np.shape(psy_pool)[0])
 
         # get random row of pys to start
         idx = np.random.randint(m_p)

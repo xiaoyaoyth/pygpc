@@ -359,8 +359,8 @@ class Static(Algorithm):
         if isinstance(self.grid, L1OPT):
             start_time = time.time()
 
-            gpc.grid = self.grid.get_pool_samples(gpc)
-
+            idx_list = self.grid.get_pool_samples(gpc)[1]
+            gpc.grid = gpc.grid[idx_list]
             iprint('Gradient evaluation: ' + str(time.time() - start_time) + ' sec',
                    tab=0, verbose=self.options["verbose"])
 
