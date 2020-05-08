@@ -1005,6 +1005,33 @@ class RandomGrid(Grid):
         if gradient:
             self.create_gradient_grid()
 
+    def ese_mu(self, dim, n, gpc):
+        # self.split = self.options[1]
+        n_ese = int(self.split * n)
+        n_mu = n - n_ese
+        design_ese = self.lhs_ese(dim, n)
+        matrix_ese = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.coords_norm, gradient=False)
+        design = design_ese[:n_ese, :]
+        idxs = []
+        for i in range(n_mu):
+            # if (n_mu - i) > 0:
+            mu_vals = []
+            idx_list = []
+            # temp = design_ese[:(n_ese + i), :]
+            bes = [k for k in range(n_mu) if k not in idxs]
+            bel = 1
+            for j in [k for k in range(n_mu) if k not in idxs]:
+                a = np.vstack((design, design_ese[j + n_ese]))
+                mu_vals.append(mutual_coherence(a))
+                idx_list.append(j)
+                mu_array = np.array(mu_vals)
+            idx_best = idx_list[np.argmin(mu_array)]
+            idxs.append(idx_best)
+            design = np.vstack((design, design_ese[idx_best + n_ese]))
+            # else:
+            #     design = np.vstack((design, design_ese[n-1]))
+        return design
+
 
 class Random(RandomGrid):
     """
@@ -1697,57 +1724,30 @@ class LHS(RandomGrid):
         return P_best
 
     # def ese_mu(self, dim, n):
-    #     # self.split = self.options[1]
     #     n_ese = int(self.split*n)
     #     n_mu = n - n_ese
-    #     design_ese = self.lhs_ese(dim, n)
-    #     design = design_ese[:n_ese, :]
+    #     if(n_ese < 1):
+    #         n_mu = n_mu - 1
+    #         design = np.random.rand(1, dim)
+    #     elif(n_ese is 1):
+    #         design = np.random.rand(1, dim)
+    #     else:
+    #         design = self.lhs_ese(dim, n_ese)
+    #     design_rand = np.random.rand(n_mu, dim)
     #     idxs = []
     #     for i in range(n_mu):
-    #         # if (n_mu - i) > 0:
     #         mu_vals = []
     #         idx_list = []
-    #         # temp = design_ese[:(n_ese + i), :]
-    #         bes = [k for k in range(n_mu) if k not in idxs]
-    #         bel = 1
     #         for j in [k for k in range(n_mu) if k not in idxs]:
-    #             a = np.vstack((design, design_ese[j + n_ese]))
+    #             a = np.vstack((design, design_rand[j]))
     #             mu_vals.append(mutual_coherence(a))
     #             idx_list.append(j)
-    #             mu_array = np.array(mu_vals)
+    #         mu_array = np.array(mu_vals)
     #         idx_best = idx_list[np.argmin(mu_array)]
     #         idxs.append(idx_best)
-    #         design = np.vstack((design, design_ese[idx_best + n_ese]))
-    #         # else:
-    #         #     design = np.vstack((design, design_ese[n-1]))
+    #         design = np.vstack((design, design_rand[idx_best]))
+    #
     #     return design
-
-
-    def ese_mu(self, dim, n):
-        n_ese = int(self.split*n)
-        n_mu = n - n_ese
-        if(n_ese < 1):
-            n_mu = n_mu - 1
-            design = np.random.rand(1, dim)
-        elif(n_ese is 1):
-            design = np.random.rand(1, dim)
-        else:
-            design = self.lhs_ese(dim, n_ese)
-        design_rand = np.random.rand(n_mu, dim)
-        idxs = []
-        for i in range(n_mu):
-            mu_vals = []
-            idx_list = []
-            for j in [k for k in range(n_mu) if k not in idxs]:
-                a = np.vstack((design, design_rand[j]))
-                mu_vals.append(mutual_coherence(a))
-                idx_list.append(j)
-            mu_array = np.array(mu_vals)
-            idx_best = idx_list[np.argmin(mu_array)]
-            idxs.append(idx_best)
-            design = np.vstack((design, design_rand[idx_best]))
-
-        return design
 class MCMC(RandomGrid):
     """
     LHS grid object
@@ -1954,7 +1954,7 @@ class L1OPT(RandomGrid):
     """
 
     def __init__(self, parameters_random, n_grid=None, seed=None, options=None, coords=None, coords_norm=None,
-                 coords_gradient=None, coords_gradient_norm=None, coords_id=None, coords_gradient_id=None):
+                 coords_gradient=None, coords_gradient_norm=None, coords_id=None, coords_gradient_id=None, gpc=None):
         """
         Constructor; Initializes Grid instance; Generates grid or copies provided content
         """
@@ -1974,42 +1974,42 @@ class L1OPT(RandomGrid):
                                    coords_gradient_norm=coords_gradient_norm,
                                    coords_id=coords_id,
                                    coords_gradient_id=coords_gradient_id)
+        if gpc is not None:
+            self.factor = 10
+            self.pool_reservoir = Random(parameters_random, n_grid=10e4, seed=None,)
 
-        self.factor = 10
-        self.n_grid = self.factor * self.n_grid
+            self.coords_reservoir = np.zeros((self.n_grid, self.dim))
+            self.coords_norm_reservoir = np.zeros((self.n_grid, self.dim))
+            self.perc_mask = np.zeros((self.n_grid, self.dim)).astype(bool)
 
-        self.coords_reservoir = np.zeros((self.n_grid, self.dim))
-        self.coords_norm_reservoir = np.zeros((self.n_grid, self.dim))
-        self.perc_mask = np.zeros((self.n_grid, self.dim)).astype(bool)
+            # Generate random samples for each random input variable [n_grid x dim]
+            self.coords_norm = np.zeros([self.n_grid, self.dim])
 
-        # Generate random samples for each random input variable [n_grid x dim]
-        self.coords_norm = np.zeros([self.n_grid, self.dim])
+            # generate Samples
+            # self.lhs_reservoir = self.get_pool_samples()
+            self.lhs_reservoir = self.pool_reservoir[self.get_pool_samples(gpc)[1]]
 
-        # generate Samples
-        # self.lhs_reservoir = self.get_pool_samples()
-        self.lhs_reservoir = np.random.rand(self.n_grid, self.dim)
+            # transform sample points from icdf to pdf space
+            for i_p, p in enumerate(self.parameters_random):
+                self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(self.lhs_reservoir[:, i_p])
+                self.perc_mask[:, i_p] = np.logical_and(
+                    self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
+                    self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
 
-        # transform sample points from icdf to pdf space
-        for i_p, p in enumerate(self.parameters_random):
-            self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(self.lhs_reservoir[:, i_p])
-            self.perc_mask[:, i_p] = np.logical_and(
-                self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
-                self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
+            # get points all satisfying perc constraints
+            self.perc_mask = self.perc_mask.all(axis=1)
+            self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
 
-        # get points all satisfying perc constraints
-        self.perc_mask = self.perc_mask.all(axis=1)
-        self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
+            self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
 
-        self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
+            # Denormalize grid to original parameter space
+            self.coords = self.get_denormalized_coordinates(self.coords_norm)
+            self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
 
-        # Denormalize grid to original parameter space
-        self.coords = self.get_denormalized_coordinates(self.coords_norm)
-        self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
-
-        # Generate unique IDs of grid points
-        self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
-
-        self.n_grid = self.n_grid / self.factor
+            # Generate unique IDs of grid points
+            self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
+        else:
+            pass
 
     def get_pool_samples(self, gpc):
 
@@ -2027,9 +2027,9 @@ class L1OPT(RandomGrid):
         index_list = []
 
         # create psy pool
-        psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.coords_norm, gradient=False)
+        psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.pool_reservoir.coords_norm, gradient=False)
         # weight psy pool with the weighting matrix
-        normalization_factor = 1 / np.linalg.norm(psy_pool)
+        normalization_factor = 1 / np.abs(np.linalg.norm(psy_pool))
         psy_pool = normalization_factor * psy_pool
 
         # m is number of needed samples, m_p number of rows in pool matrix

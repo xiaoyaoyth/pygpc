@@ -352,17 +352,24 @@ class Static(Algorithm):
         gpc.backend = self.options["backend"]
 
         # Write grid in gpc object
-        gpc.grid = copy.deepcopy(self.grid)
+        if isinstance(self.grid, L1OPT):
+            n_coeffs = get_num_coeffs_sparse(order_dim_max=[self.options["order"][0] for _ in range(self.problem.dim)],
+                                             order_glob_max=self.options["order_max"],
+                                             order_inter_max=self.options["interaction_order"],
+                                             dim=self.problem.dim)
+
+            self.grid = self.options["grid"](parameters_random=self.problem.parameters_random,
+                                             n_grid=self.options["matrix_ratio"] * n_coeffs,
+                                             seed=self.options["seed"],
+                                             options=self.options["grid_options"], gpc=gpc)
+
+        else:
+            gpc.grid = copy.deepcopy(self.grid)
+
         gpc.interaction_order_current = copy.deepcopy(self.options["interaction_order"])
 
 
-        if isinstance(self.grid, L1OPT):
-            start_time = time.time()
 
-            idx_list = self.grid.get_pool_samples(gpc)[1]
-            gpc.grid = gpc.grid[idx_list]
-            iprint('Gradient evaluation: ' + str(time.time() - start_time) + ' sec',
-                   tab=0, verbose=self.options["verbose"])
 
         # Initialize parallel Computation class
         com = Computation(n_cpu=self.n_cpu, matlab_model=self.options["matlab_model"])
