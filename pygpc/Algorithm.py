@@ -353,13 +353,8 @@ class Static(Algorithm):
 
         # Write grid in gpc object
         if isinstance(self.grid, L1OPT):
-            n_coeffs = get_num_coeffs_sparse(order_dim_max=[self.options["order"][0] for _ in range(self.problem.dim)],
-                                             order_glob_max=self.options["order_max"],
-                                             order_inter_max=self.options["interaction_order"],
-                                             dim=self.problem.dim)
-
-            self.grid = self.options["grid"](parameters_random=self.problem.parameters_random,
-                                             n_grid=self.options["matrix_ratio"] * n_coeffs,
+            gpc.grid = self.options["grid"](parameters_random=self.problem.parameters_random,
+                                             n_grid=self.options["matrix_ratio"] * self.grid.n_grid,
                                              seed=self.options["seed"],
                                              options=self.options["grid_options"], gpc=gpc)
 

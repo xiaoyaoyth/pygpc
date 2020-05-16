@@ -1975,36 +1975,14 @@ class L1OPT(RandomGrid):
                                    coords_id=coords_id,
                                    coords_gradient_id=coords_gradient_id)
         if gpc is not None:
-            self.factor = 10
-            self.pool_reservoir = Random(parameters_random, n_grid=10e4, seed=None,)
+            # self.factor = 10
+            self.random_pool = Random(parameters_random, n_grid=50, seed=None,)
 
-            self.coords_reservoir = np.zeros((self.n_grid, self.dim))
-            self.coords_norm_reservoir = np.zeros((self.n_grid, self.dim))
-            self.perc_mask = np.zeros((self.n_grid, self.dim)).astype(bool)
-
-            # Generate random samples for each random input variable [n_grid x dim]
-            self.coords_norm = np.zeros([self.n_grid, self.dim])
-
-            # generate Samples
-            # self.lhs_reservoir = self.get_pool_samples()
-            self.lhs_reservoir = self.pool_reservoir[self.get_pool_samples(gpc)[1]]
-
-            # transform sample points from icdf to pdf space
-            for i_p, p in enumerate(self.parameters_random):
-                self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(self.lhs_reservoir[:, i_p])
-                self.perc_mask[:, i_p] = np.logical_and(
-                    self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
-                    self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
-
-            # get points all satisfying perc constraints
-            self.perc_mask = self.perc_mask.all(axis=1)
-            self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
-
-            self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
+            self.coords_norm = self.random_pool.coords_norm[self.get_pool_samples(gpc)[1]]
 
             # Denormalize grid to original parameter space
             self.coords = self.get_denormalized_coordinates(self.coords_norm)
-            self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
+            # self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
 
             # Generate unique IDs of grid points
             self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
@@ -2027,13 +2005,13 @@ class L1OPT(RandomGrid):
         index_list = []
 
         # create psy pool
-        psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.pool_reservoir.coords_norm, gradient=False)
+        psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.random_pool.coords_norm, gradient=False)
         # weight psy pool with the weighting matrix
         normalization_factor = 1 / np.abs(np.linalg.norm(psy_pool))
-        psy_pool = normalization_factor * psy_pool
+        psy_pool = psy_pool / np.abs(psy_pool).max(axis=0)
 
         # m is number of needed samples, m_p number of rows in pool matrix
-        m = int(np.shape(psy_pool)[0] / self.factor)
+        m = self.n_grid
         m_p = int(np.shape(psy_pool)[0])
 
         # get random row of pys to start
@@ -2047,8 +2025,10 @@ class L1OPT(RandomGrid):
             coh_list = []
             corr_list = []
             gram_psy = None
+            idx_used = []
 
             for j in [k for k in range(m_p) if k not in index_list]:  # range(0, m_p):
+
                 new_row = psy_pool[j, :]
                 psy_temp = np.vstack((psy_opt[:i, :], new_row))
 
@@ -2068,13 +2048,18 @@ class L1OPT(RandomGrid):
 
                 corr_list.append(average_cross_correlation_gram(gram_psy))
                 # coh1_list.append(pygpc.mutual_coherence(psy_temp))
-
+                idx_used.append(j)
             # calculate the minimal distance of both criteria from zero and get the index of its row in the pool matrix
-            coh_component = ((np.asarray(coh_list) - min(coh_list)) / (max(coh_list) - min(coh_list))) ** 2
-            corr_component = ((np.asarray(corr_list) - min(corr_list)) / (max(corr_list) - min(corr_list))) ** 2
-            dist_list = coh_component + (1 * corr_component)
-            idx_best = np.argmin(dist_list)
-            index_list.append(idx_best)
+            if len(coh1_list) > 1:
+                coh_component = ((np.asarray(coh_list) - min(coh_list)) / (max(coh_list) - min(coh_list))) ** 2
+                corr_component = ((np.asarray(corr_list) - min(corr_list)) / (max(corr_list) - min(corr_list))) ** 2
+                dist_list = coh_component + (1 * corr_component)
+                idx_best = np.argmin(dist_list)
+                index_list.append(idx_used[idx_best])
+            else:
+                index_list.append(j)
+                idx_best = j
+
             # add row with best minimal coherence and cross correlation properties to the matrix
             psy_opt = np.vstack((psy_opt[:i, :], psy_pool[idx_best, :]))
 
