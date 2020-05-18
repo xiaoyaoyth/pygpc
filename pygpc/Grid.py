@@ -1976,7 +1976,7 @@ class L1OPT(RandomGrid):
                                    coords_gradient_id=coords_gradient_id)
         if gpc is not None:
             # self.factor = 10
-            self.random_pool = Random(parameters_random, n_grid=50, seed=None,)
+            self.random_pool = Random(parameters_random, n_grid=10000, seed=None,)
 
             self.coords_norm = self.random_pool.coords_norm[self.get_pool_samples(gpc)[1]]
 
