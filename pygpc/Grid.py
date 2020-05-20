@@ -1009,7 +1009,7 @@ class RandomGrid(Grid):
         # self.split = self.options[1]
         n_ese = int(self.split * n)
         n_mu = n - n_ese
-        design_ese = self.lhs_ese(dim, n)
+        design_ese = self.lhs_ese_(dim, n)
         matrix_ese = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.coords_norm, gradient=False)
         design = design_ese[:n_ese, :]
         idxs = []
@@ -1018,9 +1018,8 @@ class RandomGrid(Grid):
             mu_vals = []
             idx_list = []
             # temp = design_ese[:(n_ese + i), :]
-            bes = [k for k in range(n_mu) if k not in idxs]
-            bel = 1
-            for j in [k for k in range(n_mu) if k not in idxs]:
+            idx_left = [k for k in range(n_mu) if k not in idxs]
+            for j in idx_left:
                 a = np.vstack((design, design_ese[j + n_ese]))
                 mu_vals.append(mutual_coherence(a))
                 idx_list.append(j)
@@ -1031,7 +1030,202 @@ class RandomGrid(Grid):
             # else:
             #     design = np.vstack((design, design_ese[n-1]))
         return design
+    def lhs_ese_(self, dim, n, t0=None):
+        """
+        Create optimized LHS grid using a enhanced stochastic evolutionary algorithm for the PhiP Maximin criterion [1]
 
+        Parameters
+        ----------
+        dim : int
+            Number of random variables
+        n : int
+            Number of sampling points
+        t0 : int, optional, default: None
+            Threshold parameter
+
+        Returns
+        -------
+        design : ndarray of float [n, n_dim]
+            LHS grid points
+
+        Notes
+        -----
+        .. [1] Jin, R., Chen, W., & Sudjianto, A. (2005). An efficient algorithm for constructing optimal
+           design of computer experiments. Journal of statistical planning and inference, 134(1), 268-287.
+        """
+
+        # Parameters
+        P0 = self.lhs_initial(dim, n)
+        J = 25
+        tol = 1e-3
+        p = 10
+        outer_loop = min(int(1.5 * dim), 30)
+        inner_loop = min(20 * dim, 100)
+        fixed_index = []
+        if t0 is None:
+            t0 = 0.005 * self.PhiP(P0, p=p)
+
+        T = t0
+        P_ = P0[:]  # copy of initial design
+        P_best = P_[:]
+        Phi = self.PhiP(P_best, p=p)
+        Phi_best = Phi
+
+        # Outer loop
+        for z in range(outer_loop):
+            Phi_oldbest = Phi_best
+            n_acpt = 0
+            n_imp = 0
+
+            # Inner loop
+            for i in range(inner_loop):
+                modulo = (i + 1) % dim
+                l_P = list()
+                l_Phi = list()
+
+                # Build J different designs with a single exchanged rows
+                # See PhiP_exchange
+                for j in range(J):
+                    l_P.append(P_.copy())
+                    l_Phi.append(self.PhiP_exchange(l_P[j], k=modulo, Phi=Phi, p=p, fixed_index=fixed_index))
+
+                l_Phi = np.asarray(l_Phi)
+                k = np.argmin(l_Phi)
+                Phi_try = l_Phi[k]
+
+                # Threshold of acceptance
+                if Phi_try - Phi <= T * np.random.rand(1)[0]:
+                    Phi = Phi_try
+                    n_acpt = n_acpt + 1
+                    P_ = l_P[k]
+
+                    # Best design retained
+                    if Phi < Phi_best:
+                        P_best = P_
+                        Phi_best = Phi
+                        n_imp = n_imp + 1
+
+            p_accpt = float(n_acpt) / inner_loop  # probability of acceptance
+            p_imp = float(n_imp) / inner_loop  # probability of improvement
+
+            if Phi_best - Phi_oldbest < tol:
+                # flag_imp = 1
+                if p_accpt >= 0.1 and p_imp < p_accpt:
+                    T = 0.8 * T
+                elif p_accpt >= 0.1 and p_imp == p_accpt:
+                    pass
+                else:
+                    T = T / 0.8
+            else:
+                # flag_imp = 0
+                if p_accpt <= 0.1:
+                    T = T / 0.7
+                else:
+                    T = 0.9 * T
+        return P_best
+
+    def PhiP(self, x, p=10):
+        """
+        Calculates the Phi-p criterion of the design x with power p [1].
+
+        Parameters
+        ----------
+        x : ndarray of float [n x m]
+            The design to calculate Phi-p for
+        p : int, optional, default: 10
+            The power used for the calculation of PhiP
+
+        Returns
+        -------
+        phip : float
+            Phi-p criterion
+
+        Notes
+        -----
+        .. [1] Morris, M. D., & Mitchell, T. J. (1995). Exploratory designs for computational experiments.
+           Journal of statistical planning and inference, 43(3), 381-402.
+        """
+
+        phip = ((scipy.spatial.distance.pdist(x) ** (-p)).sum()) ** (1.0 / p)
+
+        return phip
+
+    def PhiP_exchange(self, P, k, Phi, p, fixed_index):
+        """
+        Performes a row exchange and return the altered design.
+
+        Parameters
+        ----------
+        P : ndarray of float [m x n]
+            The design to perform the exchange on
+        k : int
+            modulus of the iteration divided by the dimension to pick a row of the design repeating through the
+            dimensions of the design
+        Phi: float
+            the PhiP criterion of the current best Design
+        p: int
+            The power used for the calculation of PhiP
+        fixed_index: list
+            an empty list to check if variables are assigned a value
+
+        Returns
+        -------
+        phip : float
+            Phi-p criterion
+        """
+        # Choose two (different) random rows to perform the exchange
+        er = P.shape
+        i1 = np.random.randint(P.shape[0])
+        while i1 in fixed_index:
+            i1 = np.random.randint(P.shape[0])
+
+        i2 = np.random.randint(P.shape[0])
+        while i2 == i1 or i2 in fixed_index:
+            i2 = np.random.randint(P.shape[0])
+
+        P_ = np.delete(P, [i1, i2], axis=0)
+
+        dist1 = scipy.spatial.distance.cdist([P[i1, :]], P_)
+        dist2 = scipy.spatial.distance.cdist([P[i2, :]], P_)
+        d1 = np.sqrt(dist1 ** 2 + (P[i2, k] - P_[:, k]) ** 2 - (P[i1, k] - P_[:, k]) ** 2)
+        d2 = np.sqrt(dist2 ** 2 - (P[i2, k] - P_[:, k]) ** 2 + (P[i1, k] - P_[:, k]) ** 2)
+
+        res = (Phi ** p + (d1 ** (-p) - dist1 ** (-p) + d2 ** (-p) - dist2 ** (-p)).sum()) ** (1.0 / p)
+
+        P[i1, k], P[i2, k] = P[i2, k], P[i1, k]
+        return res
+
+    def lhs_initial(self, dim, n):
+        """
+        Construct an initial LHS grid
+
+        Parameters
+        ----------
+        dim : int
+            Number of random variables
+        n : int
+            Number of sampling points
+
+        Returns
+        -------
+        design : ndarray of float [n, n_dim]
+            LHS grid points
+        """
+        design = np.zeros([n, dim])
+
+        # u = matrix of uniform (0,1) that vary in n subareas
+        u = np.random.rand(n, dim)
+
+        for i in range(0, dim):
+            for j in range(0, n):
+                design[j, i] = j + 1
+            np.random.shuffle(design[:, i])
+
+        for i in range(0, dim):
+            for j in range(0, n):
+                design[j, i] = (design[j, i] - u[j, i]) / n
+
+        return design
 
 class Random(RandomGrid):
     """
@@ -1974,11 +2168,42 @@ class L1OPT(RandomGrid):
                                    coords_gradient_norm=coords_gradient_norm,
                                    coords_id=coords_id,
                                    coords_gradient_id=coords_gradient_id)
-        if gpc is not None:
-            # self.factor = 10
-            self.random_pool = Random(parameters_random, n_grid=10000, seed=None,)
 
-            self.coords_norm = self.random_pool.coords_norm[self.get_pool_samples(gpc)[1]]
+
+        if gpc is not None:
+
+            if self.options is None:
+                # self.factor = 10
+                self.random_pool = Random(parameters_random, n_grid=10000, seed=None,)
+
+                self.coords_norm = self.random_pool.coords_norm[self.get_pool_samples(gpc)[1]]
+
+            elif (len(self.options) > 1 and self.options[0] is 'ese'):
+                self.split = self.options[1]
+                #TODO: add option for n = 1
+                if self.n_grid > 1:
+                    self.coords_reservoir = np.zeros((self.n_grid, self.dim))
+                    self.coords_norm_reservoir = np.zeros((self.n_grid, self.dim))
+                    self.perc_mask = np.zeros((self.n_grid, self.dim)).astype(bool)
+
+                    # Generate random samples for each random input variable [n_grid x dim]
+                    self.coords_norm = np.zeros([self.n_grid, self.dim])
+
+                    # generate LHS grid in icdf space (seed of random grid (if necessary to reproduce random grid)
+                    self.coords_reservoir = self.ese_mu(dim=self.dim, n=self.n_grid, gpc=gpc)
+
+                    # transform sample points from icdf to pdf space
+                    for i_p, p in enumerate(self.parameters_random):
+                        self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(self.coords_reservoir[:, i_p])
+                        self.perc_mask[:, i_p] = np.logical_and(
+                            self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
+                            self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
+
+                    # get points all satisfying perc constraints
+                    self.perc_mask = self.perc_mask.all(axis=1)
+                    self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
+
+                    self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
 
             # Denormalize grid to original parameter space
             self.coords = self.get_denormalized_coordinates(self.coords_norm)
@@ -1986,9 +2211,9 @@ class L1OPT(RandomGrid):
 
             # Generate unique IDs of grid points
             self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
-        else:
-            pass
 
+            # else:
+            #     pass
     def get_pool_samples(self, gpc):
 
         def t_averaged_mutual_coherence(array, t=0.2):
@@ -2014,7 +2239,7 @@ class L1OPT(RandomGrid):
         m = self.n_grid
         m_p = int(np.shape(psy_pool)[0])
 
-        # get random row of pys to start
+        # get random row of psy to start
         idx = np.random.randint(m_p)
         index_list.append(idx)
         psy_opt = np.zeros([1, np.shape(psy_pool)[1]])

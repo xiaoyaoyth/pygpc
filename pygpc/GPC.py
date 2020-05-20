@@ -949,11 +949,11 @@ class GPC(object):
             results_complete = results
 
             
-        if(isinstance(self.grid, L1OPT)):# or isinstance(self.grid, LHS)  ):
-            a = 1 / np.abs(matrix).max(axis=0)
-
-            matrix = a * matrix
-            results_complete = a * results_complete
+        # if(isinstance(self.grid, L1OPT)):# or isinstance(self.grid, LHS)  ):
+        #     a = 1 / np.abs(matrix).max(axis=0)
+        #
+        #     matrix = a * matrix
+        #     results_complete = a * results_complete
 
         self.coherence_matrix = matrix
 
