@@ -1684,7 +1684,7 @@ class RegAdaptive(Algorithm):
     >>> gpc, coeffs, results = algorithm.run()
     """
 
-    def __init__(self, problem, options, validation=None):
+    def __init__(self, problem, options, validation=None, grid=None):
         """
         Constructor; Initializes RegAdaptive algorithm
         """
@@ -1729,8 +1729,10 @@ class RegAdaptive(Algorithm):
                 os.remove(fn_results + ".hdf5")
         else:
             fn_results = None
-
-        grid = self.options["grid"]
+        if self.grid is None:
+            grid = self.options["grid"]
+        else:
+            grid = self.grid
 
         # initialize iterators
         eps = self.options["eps"] + 1.0
@@ -1770,10 +1772,18 @@ class RegAdaptive(Algorithm):
         else:
             n_grid_init = gpc.basis.n_basis
 
-        gpc.grid = grid(parameters_random=self.problem.parameters_random,
-                        n_grid=n_grid_init,
-                        seed=self.options["seed"],
-                        options=self.options["grid_options"])
+
+        if self.options["grid"] == L1OPT:
+            gpc.grid = self.options["grid"](parameters_random=self.problem.parameters_random,
+                                             n_grid=n_grid_init,
+                                             seed=self.options["seed"],
+                                             options=self.options["grid_options"], gpc=gpc)
+
+        else:
+            gpc.grid = grid(parameters_random=self.problem.parameters_random,
+                            n_grid=n_grid_init,
+                            seed=self.options["seed"],
+                            options=self.options["grid_options"])
 
         gpc.solver = self.options["solver"]
         gpc.settings = self.options["settings"]

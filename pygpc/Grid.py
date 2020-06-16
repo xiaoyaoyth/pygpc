@@ -2174,12 +2174,17 @@ class L1OPT(RandomGrid):
 
             if self.options is None:
                 # self.factor = 10
-                self.random_pool = Random(parameters_random, n_grid=10000, seed=None,)
-
+                self.random_pool = Random(parameters_random, n_grid=10000, seed=None)
                 self.coords_norm = self.random_pool.coords_norm[self.get_pool_samples(gpc)[1]]
 
-            elif (len(self.options) > 1 and self.options[0] is 'ese'):
-                self.split = self.options[1]
+            elif self.options is 'greedy':
+                self.factor = 1000
+                self.random_pool = Random(parameters_random, n_grid=self.factor, seed=None)
+                self.coords_norm = self.random_pool.coords_norm[self.get_optimal_mu_greedy(gpc)]
+
+            elif self.options is not None:
+                if (len(self.options) > 1 and self.options[0] is 'ese'):
+                    self.split = self.options[1]
                 #TODO: add option for n = 1
                 if self.n_grid > 1:
                     self.coords_reservoir = np.zeros((self.n_grid, self.dim))
@@ -2190,27 +2195,36 @@ class L1OPT(RandomGrid):
                     self.coords_norm = np.zeros([self.n_grid, self.dim])
 
                     # generate LHS grid in icdf space (seed of random grid (if necessary to reproduce random grid)
-                    self.coords_reservoir = self.ese_mu(dim=self.dim, n=self.n_grid, gpc=gpc)
+                    if self.options is 'ese':
+                        self.coords_reservoir = self.ese_mu(dim=self.dim, n=self.n_grid, gpc=gpc)
+                        # transform sample points from icdf to pdf space
+                        for i_p, p in enumerate(self.parameters_random):
+                            self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(
+                                self.coords_reservoir[:, i_p])
+                            self.perc_mask[:, i_p] = np.logical_and(
+                                self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
+                                self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
 
-                    # transform sample points from icdf to pdf space
-                    for i_p, p in enumerate(self.parameters_random):
-                        self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(self.coords_reservoir[:, i_p])
-                        self.perc_mask[:, i_p] = np.logical_and(
-                            self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
-                            self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
+                        # get points all satisfying perc constraints
+                        self.perc_mask = self.perc_mask.all(axis=1)
+                        self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
 
-                    # get points all satisfying perc constraints
-                    self.perc_mask = self.perc_mask.all(axis=1)
-                    self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
+                        self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
 
-                    self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
+                        # Denormalize grid to original parameter space
+                    self.coords = self.get_denormalized_coordinates(self.coords_norm)
+                    # self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
 
-            # Denormalize grid to original parameter space
-            self.coords = self.get_denormalized_coordinates(self.coords_norm)
-            # self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
+                    # Generate unique IDs of grid points
+                    self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
 
-            # Generate unique IDs of grid points
-            self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
+                    if self.options is 'iteration':
+                        self.factor = 1000
+                        self.coords, self.coords_norm, self.coords_id = self.get_optimal_mu_iteration(gpc, parameters_random)
+
+
+
+
 
             # else:
             #     pass
@@ -2289,3 +2303,17 @@ class L1OPT(RandomGrid):
             psy_opt = np.vstack((psy_opt[:i, :], psy_pool[idx_best, :]))
 
         return psy_opt, index_list
+
+    def get_optimal_mu_iteration(self, gpc, parameters_random):
+
+        mu = np.zeros(self.factor)
+        for i in self.factor:
+            sampling_pool = Random(parameters_random, n_grid=self.n_grid, seed=None)
+            psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=sampling_pool.coords_norm, gradient=False)
+            normalized_pool = psy_pool / np.abs(psy_pool).max(axis=0)
+            mu[i] = mutual_coherence(normalized_pool)
+            if np.argmin(mu) is i:
+                best_pool = sampling_pool
+        return best_pool.coords, best_pool.coords_norm, best_pool.coords_id
+
+
