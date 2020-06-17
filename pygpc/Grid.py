@@ -1005,7 +1005,19 @@ class RandomGrid(Grid):
         if gradient:
             self.create_gradient_grid()
 
-    def ese_mu(self, dim, n, gpc):
+    def ese_mu_iter(self, dim, n, gpc):
+
+        mu = np.zeros(n)
+        for i in range(self.factor):
+            design = self.lhs_ese_(dim, n)
+            psy = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.coords_norm, gradient=False)
+            normalized_psy= psy / np.abs(psy.max(axis=0))
+            mu[i] = mutual_coherence(normalized_psy)
+            if np.argmin(mu) is i:
+                design_best = design
+        return design_best
+
+    def ese_mu_greedy(self, dim, n, gpc):
         # self.split = self.options[1]
         n_ese = int(self.split * n)
         n_mu = n - n_ese
@@ -2182,52 +2194,86 @@ class L1OPT(RandomGrid):
                 self.random_pool = Random(parameters_random, n_grid=self.factor, seed=None)
                 self.coords_norm = self.random_pool.coords_norm[self.get_optimal_mu_greedy(gpc)]
 
-            elif self.options is not None:
-                if (len(self.options) > 1 and self.options[0] is 'ese'):
-                    self.split = self.options[1]
-                #TODO: add option for n = 1
-                if self.n_grid > 1:
-                    self.coords_reservoir = np.zeros((self.n_grid, self.dim))
-                    self.coords_norm_reservoir = np.zeros((self.n_grid, self.dim))
-                    self.perc_mask = np.zeros((self.n_grid, self.dim)).astype(bool)
 
-                    # Generate random samples for each random input variable [n_grid x dim]
-                    self.coords_norm = np.zeros([self.n_grid, self.dim])
+            if (len(self.options) > 1 and (self.options[0] is 'ese_iter' or self.options[0] is 'ese_greedy')):
+                self.split = self.options[1]
+            #TODO: add option for n = 1
+            if self.n_grid > 1:
+                self.coords_reservoir = np.zeros((self.n_grid, self.dim))
+                self.coords_norm_reservoir = np.zeros((self.n_grid, self.dim))
+                self.perc_mask = np.zeros((self.n_grid, self.dim)).astype(bool)
 
-                    # generate LHS grid in icdf space (seed of random grid (if necessary to reproduce random grid)
-                    if self.options is 'ese':
-                        self.coords_reservoir = self.ese_mu(dim=self.dim, n=self.n_grid, gpc=gpc)
-                        # transform sample points from icdf to pdf space
-                        for i_p, p in enumerate(self.parameters_random):
-                            self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(
-                                self.coords_reservoir[:, i_p])
-                            self.perc_mask[:, i_p] = np.logical_and(
-                                self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
-                                self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
+                # Generate random samples for each random input variable [n_grid x dim]
+                self.coords_norm = np.zeros([self.n_grid, self.dim])
 
-                        # get points all satisfying perc constraints
-                        self.perc_mask = self.perc_mask.all(axis=1)
-                        self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
+                # generate LHS grid in icdf space (seed of random grid (if necessary to reproduce random grid)
+                if self.options is 'ese_iter':
+                    self.coords_reservoir = self.ese_mu_greedy(dim=self.dim, n=self.n_grid, gpc=gpc)
+                if self.options is 'ese_greedy':
+                    self.coords_reservoir = self.ese_mu(dim=self.dim, n=self.n_grid, gpc=gpc)
+                # transform sample points from icdf to pdf space
+                for i_p, p in enumerate(self.parameters_random):
+                    self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(
+                        self.coords_reservoir[:, i_p])
+                    self.perc_mask[:, i_p] = np.logical_and(
+                        self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
+                        self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
 
-                        self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
+                # get points all satisfying perc constraints
+                self.perc_mask = self.perc_mask.all(axis=1)
+                self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
 
-                        # Denormalize grid to original parameter space
-                    self.coords = self.get_denormalized_coordinates(self.coords_norm)
-                    # self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
+                self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
 
-                    # Generate unique IDs of grid points
-                    self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
+                # Denormalize grid to original parameter space
+            self.coords = self.get_denormalized_coordinates(self.coords_norm)
+            # self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
 
-                    if self.options is 'iteration':
-                        self.factor = 1000
-                        self.coords, self.coords_norm, self.coords_id = self.get_optimal_mu_iteration(gpc, parameters_random)
+            # Generate unique IDs of grid points
+            self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
+
+            if self.options is 'iteration':
+                self.factor = 1000
+                self.coords, self.coords_norm, self.coords_id = self.get_optimal_mu_iteration(gpc, parameters_random)
 
 
+    def get_optimal_mu_greedy(self, gpc):
+        index_list = []
+        psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.random_pool.coords_norm, gradient=False)
+        psy_pool = psy_pool / np.abs(psy_pool).max(axis=0)
+        m = self.n_grid
+        m_p = int(np.shape(psy_pool)[0])
 
+        # get random row of psy to start
+        idx = np.random.randint(m_p)
+        index_list.append(idx)
+        psy_opt = np.zeros([1, np.shape(psy_pool)[1]])
+        psy_opt[0, :] = psy_pool[idx, :]
 
+        for i in range(1, m):
+            coh_list = []
+            idx_used = []
 
-            # else:
-            #     pass
+            for j in [k for k in range(m_p) if k not in index_list]:  # range(0, m_p):
+
+                new_row = psy_pool[j, :]
+                psy_temp = np.vstack((psy_opt[:i, :], new_row))
+
+                coh_list.append(mutual_coherence(psy_temp))
+                idx_used.append(j)
+                # calculate the minimal distance of both criteria from zero and get the index of its row in the pool matrix
+                if len(coh_list) > 1:
+                    idx_best = np.argmin(coh_list)
+                    index_list.append(idx_used[idx_best])
+                else:
+                    index_list.append(j)
+                    idx_best = j
+
+                # add row with best minimal coherence and cross correlation properties to the matrix
+                psy_opt = np.vstack((psy_opt[:i, :], psy_pool[idx_best, :]))
+
+        return index_list
+
     def get_pool_samples(self, gpc):
 
         def t_averaged_mutual_coherence(array, t=0.2):
