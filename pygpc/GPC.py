@@ -948,7 +948,6 @@ class GPC(object):
         else:
             results_complete = results
 
-            
         # if(isinstance(self.grid, L1OPT)):# or isinstance(self.grid, LHS)  ):
         #     a = 1 / np.abs(matrix).max(axis=0)
         #
@@ -956,7 +955,6 @@ class GPC(object):
         #     results_complete = a * results_complete
 
         self.coherence_matrix = matrix
-
 
         #################
         # Moore-Penrose #
@@ -1071,8 +1069,7 @@ class GPC(object):
             problem = self.problem
 
         grid = Random(parameters_random=problem.parameters_random,
-                      n_grid=n_samples,
-                      seed=None)
+                      n_grid=n_samples)
 
         # Evaluate original model at grid points
         com = Computation(n_cpu=n_cpu, matlab_model=self.matlab_model)

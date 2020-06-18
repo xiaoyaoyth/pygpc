@@ -368,7 +368,6 @@ def get_beta_pdf_fit(data, beta_tolerance=0, uni_interval=0, fn_plot=None):
     return beta_parameters, moments, p_value, uni_parameters
 
 
-
 def mutual_coherence(array):
     """
     Calculate the mutual coherence of a matrix A. It can also be referred as the cosine of the smallest angle
@@ -1088,3 +1087,45 @@ def compute_chunks(seq, num):
     out += [[]] * n_empty
 
     return out
+
+
+def t_averaged_mutual_coherence(array, t=0.2):
+    """
+    Computes the t-averaged mutual coherence.
+
+    Parameters
+    ----------
+    array : ndarray of float [m x n]
+        Matrix
+    t : float
+        Threshold
+
+    Returns
+    -------
+    res : float
+        t-averaged mutual coherence
+    """
+    array = np.abs(array)
+    mask = array > t
+
+    return np.sum(array[mask]) / np.sum(mask)
+
+
+def average_cross_correlation_gram(array):
+    """
+    Computes the average cross correlation of the gram matrix.
+
+    Parameters
+    ----------
+    array : ndarray of float [m x n]
+        Gram matrix
+
+    Returns
+    -------
+    res : float
+        cross correlation
+    """
+    n = array.shape[1]
+    k = n * (n - 1)
+
+    return (1 / k) * (np.linalg.norm(np.identity(n) - array) ** 2)

@@ -232,6 +232,9 @@ class Algorithm(object):
         if "backend" not in self.options.keys():
             self.options["backend"] = "python"
 
+        if "n_grid" not in self.options.keys():
+            self.options["n_grid"] = None
+
 
 class Static(Algorithm):
     """
@@ -276,7 +279,7 @@ class Static(Algorithm):
     >>> gpc, coeffs, results = algorithm.run()
     """
 
-    def __init__(self, problem, options, grid, validation=None):
+    def __init__(self, problem, options, grid=None, validation=None):
         """
         Constructor; Initializes static gPC algorithm
         """
@@ -351,20 +354,36 @@ class Static(Algorithm):
 
         gpc.backend = self.options["backend"]
 
+        # determine number of basis functions
+        n_coeffs = get_num_coeffs_sparse(order_dim_max=self.options["order"],
+                                         order_glob_max=self.options["order_max"],
+                                         order_inter_max=self.options["interaction_order"],
+                                         dim=self.problem.dim)
+
+        if self.options["n_grid"] is not None:
+            n_grid = self.options["n_grid"]
+        else:
+            n_grid = self.options["matrix_ratio"] * n_coeffs
+
         # Write grid in gpc object
-        if isinstance(self.grid, L1OPT):
+        if self.grid is not None:
+            gpc.grid = self.grid
+
+        elif self.options["grid"] == Random or self.options["grid"] == LHS:
             gpc.grid = self.options["grid"](parameters_random=self.problem.parameters_random,
-                                             n_grid=self.options["matrix_ratio"] * self.grid.n_grid,
-                                             seed=self.options["seed"],
-                                             options=self.options["grid_options"], gpc=gpc)
+                                            n_grid=n_grid,
+                                            options=self.options["grid_options"])
+
+        elif self.options["grid"] == L1 or self.options["grid"] == L1_LHS or self.options["grid"] == LHS_L1:
+            gpc.grid = self.options["grid"](parameters_random=self.problem.parameters_random,
+                                            n_grid=n_grid,
+                                            options=self.options["grid_options"],
+                                            gpc=gpc)
 
         else:
-            gpc.grid = copy.deepcopy(self.grid)
+            raise ValueError("Grid not provided and specified grid type not known!")
 
         gpc.interaction_order_current = copy.deepcopy(self.options["interaction_order"])
-
-
-
 
         # Initialize parallel Computation class
         com = Computation(n_cpu=self.n_cpu, matlab_model=self.options["matlab_model"])
@@ -1773,7 +1792,7 @@ class RegAdaptive(Algorithm):
             n_grid_init = gpc.basis.n_basis
 
 
-        if self.options["grid"] == L1OPT:
+        if self.options["grid"] == L1:
             gpc.grid = self.options["grid"](parameters_random=self.problem.parameters_random,
                                              n_grid=n_grid_init,
                                              seed=self.options["seed"],

@@ -6,6 +6,13 @@ from .io import iprint
 from .misc import get_multi_indices
 from .misc import get_cartesian_product
 from .misc import mutual_coherence
+from .misc import t_averaged_mutual_coherence
+from .misc import average_cross_correlation_gram
+from .misc import compute_chunks
+import multiprocessing.pool
+from _functools import partial
+
+
 from.Quadrature import *
 
 
@@ -819,7 +826,7 @@ class RandomGrid(Grid):
     Examples
     --------
     >>> import pygpc
-    >>> grid = pygpc.RandomGrid(parameters_random=parameters_random, n_grid=100, seed=1, options=None)
+    >>> grid = pygpc.RandomGrid(parameters_random=parameters_random, n_grid=100, options=None)
 
     Attributes
     ----------
@@ -845,7 +852,7 @@ class RandomGrid(Grid):
         Unique IDs of grid points
     """
 
-    def __init__(self, parameters_random, n_grid=None, seed=None, options=None, coords=None, coords_norm=None,
+    def __init__(self, parameters_random, n_grid=None, options=None, coords=None, coords_norm=None,
                  coords_gradient=None, coords_gradient_norm=None, coords_id=None, coords_gradient_id=None):
         """
         Constructor; Initializes RandomGrid instance; Generates grid
@@ -859,11 +866,15 @@ class RandomGrid(Grid):
                                          coords_gradient_id=coords_gradient_id)
 
         self.n_grid = int(n_grid)
-        self.seed = seed
         self.options = options
+        self.seed = None
 
-    def extend_random_grid(self, n_grid_new=None, coords=None, coords_norm=None, seed=None,
-                           classifier=None, domain=None, gradient=False, grid=None):
+        if type(options) is dict:
+            if "seed" in options.keys():
+                self.seed = self.options["seed"]
+
+    def extend_random_grid(self, n_grid_new=None, coords=None, coords_norm=None, classifier=None, domain=None,
+                           gradient=False):
         """
         Add sample points according to input pdfs to grid (old points are kept). Define either the new total number of
         grid points with "n_grid_new" or add grid-points manually by providing "coords" and "coords_norm".
@@ -891,31 +902,6 @@ class RandomGrid(Grid):
             Optional initial grid, which gets extended
         """
 
-        def lhs_extend(self, array, n_extend):
-            dim = np.shape(array)[1]
-            n_old = np.shape(array)[0]
-            n_new = n_old + n_extend
-            a_new = np.zeros([n_extend, np.shape(array)[1]])
-            u = np.random.rand(n_new, np.shape(array)[1])
-            # array = np.insert(array, n_old, np.zeros([n_extend ,np.shape(array)[1]]), axis=0)
-            for d in range(dim):
-                k = 0
-                s = 0
-                for j in range(n_new - 1):
-                    if not float(j / n_new) < float(np.sort(array[:, d])[min((j + s), len(array) - 1)]) < float(
-                            (j + 1) / n_new):
-                        if float((j + 1) / n_new) <= float(np.sort(array[:, d])[min((j + s), len(array) - 1)]):
-                            s = s - 1
-                        else:
-                            j = j - 1
-                            s = s + 1
-                        k = k + 1
-                        if k is np.shape(a_new)[0] + 1:
-                            k = 1
-                        a_new[k - 1, d] = float((j + u[j, d]) / n_new)
-                np.random.shuffle(a_new[:, d])
-            return np.insert(array, n_old, a_new, axis=0)
-
         if n_grid_new is not None:
             # Number of new grid points
             n_grid_add = int(n_grid_new - self.n_grid)
@@ -926,7 +912,6 @@ class RandomGrid(Grid):
                     if isinstance(self, Random):
                         new_grid = Random(parameters_random=self.parameters_random,
                                           n_grid=n_grid_add,
-                                          seed=seed,
                                           options=self.options)
 
                         # append points to existing grid
@@ -935,9 +920,42 @@ class RandomGrid(Grid):
 
                     elif isinstance(self, LHS):
                         # append points to existing grid
-                        self.coords = lhs_extend(self.coords_reservoir, n_grid_new)
-                        self.coords_norm = np.vstack([self.coords_norm, self.coords_norm_reservoir[self.n_grid:n_grid_new]])
+                        # self.coords = self.lhs_extend(self.coords_reservoir, n_grid_new)
+                        # self.coords_norm = np.vstack([self.coords_norm, self.coords_norm_reservoir[self.n_grid:n_grid_new]])
 
+                        new_grid = LHS(parameters_random=self.parameters_random,
+                                       n_grid=n_grid_add,
+                                       grid_pre=self,
+                                       options=self.options)
+
+                        # append points to existing grid
+                        self.coords = np.vstack([self.coords, new_grid.coords])
+                        self.coords_norm = np.vstack([self.coords_norm, new_grid.coords_norm])
+
+                    elif isinstance(self, L1):
+                        new_grid = L1(parameters_random=self.parameters_random,
+                                      n_grid=n_grid_add,
+                                      grid_pre=self,
+                                      gpc=self.gpc,
+                                      options=self.options)
+
+                        # append points to existing grid
+                        self.coords = np.vstack([self.coords, new_grid.coords])
+                        self.coords_norm = np.vstack([self.coords_norm, new_grid.coords_norm])
+
+                    elif isinstance(self, L1_LHS):
+                        new_grid = L1_LHS(parameters_random=self.parameters_random,
+                                          n_grid=n_grid_add,
+                                          grid_pre=self,
+                                          gpc=self.gpc,
+                                          options=self.options)
+
+                        # append points to existing grid
+                        self.coords = np.vstack([self.coords, new_grid.coords])
+                        self.coords_norm = np.vstack([self.coords_norm, new_grid.coords_norm])
+
+                    elif isinstance(self, LHS_L1):
+                        pass
                 else:
                     coords = np.zeros((n_grid_add, len(self.parameters_random)))
                     coords_norm = np.zeros((n_grid_add, len(self.parameters_random)))
@@ -949,7 +967,6 @@ class RandomGrid(Grid):
                             if isinstance(self, Random):
                                 new_grid = Random(parameters_random=self.parameters_random,
                                                   n_grid=1,
-                                                  seed=seed,
                                                   options=self.options)
 
                                 # test if grid point lies in right domain
@@ -962,7 +979,7 @@ class RandomGrid(Grid):
                                 # check if gridpoint exceeds sampling reservoir
                                 # if self.n_grid > max(10000, self.n_grid_lhs * 10)
                                 # coords.np.append(pygpc.LSH( seed=seed+1))
-                                coords_norm_test = lhs_extend(self.coords_norm_reservoir, 1)
+                                coords_norm_test = self.lhs_extend(self.coords_norm_reservoir, 1)
                                 # test if next grid point lies in right domain
                                 if classifier.predict(coords_norm_test[len(coords_norm_test) - 1]) == domain:
                                     self.coords_norm_reservoir = coords_norm_test
@@ -1005,239 +1022,30 @@ class RandomGrid(Grid):
         if gradient:
             self.create_gradient_grid()
 
-    def ese_mu_iter(self, dim, n, gpc):
-
-        mu = np.zeros(n)
-        for i in range(self.factor):
-            design = self.lhs_ese_(dim, n)
-            psy = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.coords_norm, gradient=False)
-            normalized_psy= psy / np.abs(psy.max(axis=0))
-            mu[i] = mutual_coherence(normalized_psy)
-            if np.argmin(mu) is i:
-                design_best = design
-        return design_best
-
-    def ese_mu_greedy(self, dim, n, gpc):
-        # self.split = self.options[1]
-        n_ese = int(self.split * n)
-        n_mu = n - n_ese
-        design_ese = self.lhs_ese_(dim, n)
-        matrix_ese = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.coords_norm, gradient=False)
-        design = design_ese[:n_ese, :]
-        idxs = []
-        for i in range(n_mu):
-            # if (n_mu - i) > 0:
-            mu_vals = []
-            idx_list = []
-            # temp = design_ese[:(n_ese + i), :]
-            idx_left = [k for k in range(n_mu) if k not in idxs]
-            for j in idx_left:
-                a = np.vstack((design, design_ese[j + n_ese]))
-                mu_vals.append(mutual_coherence(a))
-                idx_list.append(j)
-                mu_array = np.array(mu_vals)
-            idx_best = idx_list[np.argmin(mu_array)]
-            idxs.append(idx_best)
-            design = np.vstack((design, design_ese[idx_best + n_ese]))
-            # else:
-            #     design = np.vstack((design, design_ese[n-1]))
-        return design
-    def lhs_ese_(self, dim, n, t0=None):
-        """
-        Create optimized LHS grid using a enhanced stochastic evolutionary algorithm for the PhiP Maximin criterion [1]
-
-        Parameters
-        ----------
-        dim : int
-            Number of random variables
-        n : int
-            Number of sampling points
-        t0 : int, optional, default: None
-            Threshold parameter
-
-        Returns
-        -------
-        design : ndarray of float [n, n_dim]
-            LHS grid points
-
-        Notes
-        -----
-        .. [1] Jin, R., Chen, W., & Sudjianto, A. (2005). An efficient algorithm for constructing optimal
-           design of computer experiments. Journal of statistical planning and inference, 134(1), 268-287.
-        """
-
-        # Parameters
-        P0 = self.lhs_initial(dim, n)
-        J = 25
-        tol = 1e-3
-        p = 10
-        outer_loop = min(int(1.5 * dim), 30)
-        inner_loop = min(20 * dim, 100)
-        fixed_index = []
-        if t0 is None:
-            t0 = 0.005 * self.PhiP(P0, p=p)
-
-        T = t0
-        P_ = P0[:]  # copy of initial design
-        P_best = P_[:]
-        Phi = self.PhiP(P_best, p=p)
-        Phi_best = Phi
-
-        # Outer loop
-        for z in range(outer_loop):
-            Phi_oldbest = Phi_best
-            n_acpt = 0
-            n_imp = 0
-
-            # Inner loop
-            for i in range(inner_loop):
-                modulo = (i + 1) % dim
-                l_P = list()
-                l_Phi = list()
-
-                # Build J different designs with a single exchanged rows
-                # See PhiP_exchange
-                for j in range(J):
-                    l_P.append(P_.copy())
-                    l_Phi.append(self.PhiP_exchange(l_P[j], k=modulo, Phi=Phi, p=p, fixed_index=fixed_index))
-
-                l_Phi = np.asarray(l_Phi)
-                k = np.argmin(l_Phi)
-                Phi_try = l_Phi[k]
-
-                # Threshold of acceptance
-                if Phi_try - Phi <= T * np.random.rand(1)[0]:
-                    Phi = Phi_try
-                    n_acpt = n_acpt + 1
-                    P_ = l_P[k]
-
-                    # Best design retained
-                    if Phi < Phi_best:
-                        P_best = P_
-                        Phi_best = Phi
-                        n_imp = n_imp + 1
-
-            p_accpt = float(n_acpt) / inner_loop  # probability of acceptance
-            p_imp = float(n_imp) / inner_loop  # probability of improvement
-
-            if Phi_best - Phi_oldbest < tol:
-                # flag_imp = 1
-                if p_accpt >= 0.1 and p_imp < p_accpt:
-                    T = 0.8 * T
-                elif p_accpt >= 0.1 and p_imp == p_accpt:
-                    pass
-                else:
-                    T = T / 0.8
-            else:
-                # flag_imp = 0
-                if p_accpt <= 0.1:
-                    T = T / 0.7
-                else:
-                    T = 0.9 * T
-        return P_best
-
-    def PhiP(self, x, p=10):
-        """
-        Calculates the Phi-p criterion of the design x with power p [1].
-
-        Parameters
-        ----------
-        x : ndarray of float [n x m]
-            The design to calculate Phi-p for
-        p : int, optional, default: 10
-            The power used for the calculation of PhiP
-
-        Returns
-        -------
-        phip : float
-            Phi-p criterion
-
-        Notes
-        -----
-        .. [1] Morris, M. D., & Mitchell, T. J. (1995). Exploratory designs for computational experiments.
-           Journal of statistical planning and inference, 43(3), 381-402.
-        """
-
-        phip = ((scipy.spatial.distance.pdist(x) ** (-p)).sum()) ** (1.0 / p)
-
-        return phip
-
-    def PhiP_exchange(self, P, k, Phi, p, fixed_index):
-        """
-        Performes a row exchange and return the altered design.
-
-        Parameters
-        ----------
-        P : ndarray of float [m x n]
-            The design to perform the exchange on
-        k : int
-            modulus of the iteration divided by the dimension to pick a row of the design repeating through the
-            dimensions of the design
-        Phi: float
-            the PhiP criterion of the current best Design
-        p: int
-            The power used for the calculation of PhiP
-        fixed_index: list
-            an empty list to check if variables are assigned a value
-
-        Returns
-        -------
-        phip : float
-            Phi-p criterion
-        """
-        # Choose two (different) random rows to perform the exchange
-        er = P.shape
-        i1 = np.random.randint(P.shape[0])
-        while i1 in fixed_index:
-            i1 = np.random.randint(P.shape[0])
-
-        i2 = np.random.randint(P.shape[0])
-        while i2 == i1 or i2 in fixed_index:
-            i2 = np.random.randint(P.shape[0])
-
-        P_ = np.delete(P, [i1, i2], axis=0)
-
-        dist1 = scipy.spatial.distance.cdist([P[i1, :]], P_)
-        dist2 = scipy.spatial.distance.cdist([P[i2, :]], P_)
-        d1 = np.sqrt(dist1 ** 2 + (P[i2, k] - P_[:, k]) ** 2 - (P[i1, k] - P_[:, k]) ** 2)
-        d2 = np.sqrt(dist2 ** 2 - (P[i2, k] - P_[:, k]) ** 2 + (P[i1, k] - P_[:, k]) ** 2)
-
-        res = (Phi ** p + (d1 ** (-p) - dist1 ** (-p) + d2 ** (-p) - dist2 ** (-p)).sum()) ** (1.0 / p)
-
-        P[i1, k], P[i2, k] = P[i2, k], P[i1, k]
-        return res
-
-    def lhs_initial(self, dim, n):
-        """
-        Construct an initial LHS grid
-
-        Parameters
-        ----------
-        dim : int
-            Number of random variables
-        n : int
-            Number of sampling points
-
-        Returns
-        -------
-        design : ndarray of float [n, n_dim]
-            LHS grid points
-        """
-        design = np.zeros([n, dim])
-
-        # u = matrix of uniform (0,1) that vary in n subareas
-        u = np.random.rand(n, dim)
-
-        for i in range(0, dim):
-            for j in range(0, n):
-                design[j, i] = j + 1
-            np.random.shuffle(design[:, i])
-
-        for i in range(0, dim):
-            for j in range(0, n):
-                design[j, i] = (design[j, i] - u[j, i]) / n
-
-        return design
+    def lhs_extend(self, array, n_extend):
+        dim = np.shape(array)[1]
+        n_old = np.shape(array)[0]
+        n_new = n_old + n_extend
+        a_new = np.zeros([n_extend, np.shape(array)[1]])
+        u = np.random.rand(n_new, np.shape(array)[1])
+        # array = np.insert(array, n_old, np.zeros([n_extend ,np.shape(array)[1]]), axis=0)
+        for d in range(dim):
+            k = 0
+            s = 0
+            for j in range(n_new - 1):
+                if not float(j / n_new) < float(np.sort(array[:, d])[min((j + s), len(array) - 1)]) < float(
+                        (j + 1) / n_new):
+                    if float((j + 1) / n_new) <= float(np.sort(array[:, d])[min((j + s), len(array) - 1)]):
+                        s = s - 1
+                    else:
+                        j = j - 1
+                        s = s + 1
+                    k = k + 1
+                    if k is np.shape(a_new)[0] + 1:
+                        k = 1
+                    a_new[k - 1, d] = float((j + u[j, d]) / n_new)
+            np.random.shuffle(a_new[:, d])
+        return np.insert(array, n_old, a_new, axis=0)
 
 class Random(RandomGrid):
     """
@@ -1269,7 +1077,7 @@ class Random(RandomGrid):
     Examples
     --------
     >>> import pygpc
-    >>> grid = pygpc.Random(parameters_random=parameters_random, n_grid=100, seed=1)
+    >>> grid = pygpc.Random(parameters_random=parameters_random, n_grid=100)
 
     Attributes
     ----------
@@ -1295,14 +1103,13 @@ class Random(RandomGrid):
         Unique IDs of grid points
     """
 
-    def __init__(self, parameters_random, n_grid=None, seed=None, options=None, coords=None, coords_norm=None,
+    def __init__(self, parameters_random, n_grid=None, options=None, coords=None, coords_norm=None,
                  coords_gradient=None, coords_gradient_norm=None, coords_id=None, coords_gradient_id=None):
         """
         Constructor; Initializes RandomGrid instance; Generates grid or copies provided content
         """
         super(Random, self).__init__(parameters_random,
                                      n_grid=n_grid,
-                                     seed=seed,
                                      options=options,
                                      coords=coords,
                                      coords_norm=coords_norm,
@@ -1322,7 +1129,10 @@ class Random(RandomGrid):
                 np.random.seed(self.seed)
 
             # Generate random samples for each random input variable [n_grid x dim]
-            self.coords_norm = np.zeros([self.n_grid, self.dim])
+            try:
+                self.coords_norm = np.zeros([self.n_grid, self.dim])
+            except ValueError:
+                a=1
 
             # in case of seeding, the random grid is constructed element wise (same grid-points when n_grid differs)
             if self.seed:
@@ -1442,7 +1252,7 @@ class LHS(RandomGrid):
     Examples
     --------
     >>> import pygpc
-    >>> grid = pygpc.LHS(parameters_random=parameters_random, n_grid=100, seed=1, options=options)
+    >>> grid = pygpc.LHS(parameters_random=parameters_random, n_grid=100, options=options)
 
     Attributes
     ----------
@@ -1471,8 +1281,9 @@ class LHS(RandomGrid):
         Unique IDs of grid points
     """
 
-    def __init__(self, parameters_random, n_grid=None, seed=None, options=None, coords=None, coords_norm=None,
-                 coords_gradient=None, coords_gradient_norm=None, coords_id=None, coords_gradient_id=None):
+    def __init__(self, parameters_random, n_grid=None, options=None, coords=None, coords_norm=None,
+                 coords_gradient=None, coords_gradient_norm=None, coords_id=None, coords_gradient_id=None,
+                 grid_pre=None):
         """
         Constructor; Initializes RandomGrid instance; Generates grid or copies provided content
         """
@@ -1481,10 +1292,21 @@ class LHS(RandomGrid):
         self.perc_mask = None
         self.coords_reservoir = None
         self.coords_norm_reservoir = None
+        self.grid_pre = grid_pre
+        self.options = options
+        self.criterion = None
+
+        if type(self.options) is dict:
+            if "criterion" in self.options.keys():
+                self.criterion = options["criterion"]
+            else:
+                self.criterion = ["ese"]
+
+        if self.criterion is not []:
+            self.criterion = [self.criterion]
 
         super(LHS, self).__init__(parameters_random,
                                   n_grid=n_grid,
-                                  seed=seed,
                                   options=options,
                                   coords=coords,
                                   coords_norm=coords_norm,
@@ -1528,14 +1350,14 @@ class LHS(RandomGrid):
             self.perc_mask = np.zeros((n_grid_lhs, self.dim)).astype(bool)
 
             if n_grid < 2:
-                if self.options is 'ese':
-                    self.options = 'maximin'
+                if self.criterion is ['ese']:
+                    self.criterion = ['maximin']
 
             # Generate random samples for each random input variable [n_grid x dim]
             self.coords_norm = np.zeros([self.n_grid, self.dim])
 
             # generate LHS grid in icdf space (seed of random grid (if necessary to reproduce random grid)
-            self.lhs_reservoir = self.get_lhs_grid(dim=self.dim, n=n_grid_lhs, crit=self.options, random_state=self.seed)
+            self.lhs_reservoir = self.get_lhs_grid()
 
             # transform sample points from icdf to pdf space
             for i_p, p in enumerate(self.parameters_random):
@@ -1550,6 +1372,11 @@ class LHS(RandomGrid):
 
             self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
 
+        else:
+            self.coords_norm = Random(parameters_random=self.parameters_random,
+                                      n_grid=self.n_grid,
+                                          options=self.options)
+
             # Denormalize grid to original parameter space
             self.coords = self.get_denormalized_coordinates(self.coords_norm)
             self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
@@ -1557,8 +1384,6 @@ class LHS(RandomGrid):
             # Generate unique IDs of grid points
             self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
 
-        else:
-            pass
 
     def CL2(self, array):
         """
@@ -1695,7 +1520,7 @@ class LHS(RandomGrid):
         P[i1, k], P[i2, k] = P[i2, k], P[i1, k]
         return res
 
-    def get_lhs_grid(self, dim, n, crit=None, random_state=None):
+    def get_lhs_grid(self):
         """
         Create samples in an m*n matrix using Latin Hypercube Sampling [1].
 
@@ -1705,7 +1530,7 @@ class LHS(RandomGrid):
             Number of random variables
         n : int
             Number of sampling points
-        crit : str, optional, default: None (regular LHS)
+        criterion : str, optional, default: None (regular LHS)
             Criterion of LHS grid:
             - 'corr' - optimizes design points in their spearman correlation coefficients
             - 'maximin' or 'm' - optimizes design points in their maximum minimal distance using the Phi-P criterion
@@ -1721,27 +1546,16 @@ class LHS(RandomGrid):
         .. [1] McKay, M. D., Beckman, R. J., & Conover, W. J. (2000). A comparison of three methods for selecting
            values of input variables in the analysis of output from a computer code. Technometrics, 42(1), 55-61.
         """
-        if crit is not None:
-            if len(crit) is 2:
-                self.split = crit[1]
-                crit = crit[0]
-
-        if random_state is None:
-            random_state = np.random.RandomState()
-        elif not isinstance(random_state, np.random.RandomState):
-            random_state = np.random.RandomState(random_state)
-        if crit is 'corr':
-            return self.lhs_corr(dim, n, 100)
-        elif crit is 'maximin' or crit is 'm':
-            return self.lhs_maximin(dim, n, 100)
-        elif crit is 'ese':
-            return self.lhs_ese(dim, n)
-        elif crit is 'ese_mu':
-            return self.ese_mu(dim, n)
+        if self.criterion is 'corr':
+            return self.lhs_corr()
+        elif self.criterion is 'maximin' or self.criterion is 'm':
+            return self.lhs_maximin()
+        elif self.criterion is 'ese':
+            return self.lhs_ese()
         else:
-            return self.lhs_initial(dim, n)
+            return self.lhs_initial()
 
-    def lhs_initial(self, dim, n):
+    def lhs_initial(self):
         """
         Construct an initial LHS grid
 
@@ -1757,23 +1571,26 @@ class LHS(RandomGrid):
         design : ndarray of float [n, n_dim]
             LHS grid points
         """
-        design = np.zeros([n, dim])
+        if self.grid_pre is not None:
+            return self.lhs_extend(self.grid_pre, self.n_grid)
+        else:
+            design = np.zeros([self.n_grid, self.dim])
 
-        # u = matrix of uniform (0,1) that vary in n subareas
-        u = np.random.rand(n, dim)
+            # u = matrix of uniform (0,1) that vary in n subareas
+            u = np.random.rand(self.n_grid, self.dim)
 
-        for i in range(0, dim):
-            for j in range(0, n):
-                design[j, i] = j + 1
-            np.random.shuffle(design[:, i])
+            for i in range(0, self.dim):
+                for j in range(0, self.n_grid):
+                    design[j, i] = j + 1
+                np.random.shuffle(design[:, i])
 
-        for i in range(0, dim):
-            for j in range(0, n):
-                design[j, i] = (design[j, i] - u[j, i]) / n
+            for i in range(0, self.dim):
+                for j in range(0, self.n_grid):
+                    design[j, i] = (design[j, i] - u[j, i]) / self.n_grid
 
-        return design
+            return design
 
-    def lhs_corr(self, dim, n, iterations):
+    def lhs_corr(self):
         """
         Create a correlation optimized LHS grid
 
@@ -1794,9 +1611,9 @@ class LHS(RandomGrid):
         mincorr = np.inf
 
         # Minimize the components correlation coefficients
-        for i in range(iterations):
+        for i in range(100):
             # Generate a random LHS
-            test = self.lhs_initial(dim, n)
+            test = self.lhs_initial()
             R = scipy.stats.spearmanr(test)[0]
 
             if np.max(np.abs(R)) < mincorr:
@@ -1805,7 +1622,7 @@ class LHS(RandomGrid):
 
         return design
 
-    def lhs_maximin(self, dim, n, iterations):
+    def lhs_maximin(self):
         """
         Create an optimized LHS grid with maximal minimal distance
 
@@ -1823,11 +1640,11 @@ class LHS(RandomGrid):
         design : ndarray of float [n, n_dim]
             LHS grid points
         """
-        phi_best = max(1000, n * 100)
+        phi_best = max(1000, self.n_grid * 100)
 
         # Maximize the minimum distance between points
-        for i in range(iterations):
-            test = self.lhs_initial(dim, n)
+        for i in range(100):
+            test = self.lhs_initial()
             phi = self.PhiP(test)
             if phi_best > phi:
                 phi_best = phi
@@ -1835,7 +1652,7 @@ class LHS(RandomGrid):
 
         return design
 
-    def lhs_ese(self, dim, n, t0=None):
+    def lhs_ese(self):
         """
         Create optimized LHS grid using a enhanced stochastic evolutionary algorithm for the PhiP Maximin criterion [1]
 
@@ -1860,12 +1677,13 @@ class LHS(RandomGrid):
         """
 
         # Parameters
-        P0 = self.lhs_initial(dim, n)
+        t0 = None
+        P0 = self.lhs_initial()
         J = 25
         tol = 1e-3
         p = 10
-        outer_loop = min(int(1.5 * dim), 30)
-        inner_loop = min(20 * dim, 100)
+        outer_loop = min(int(1.5 * self.dim), 30)
+        inner_loop = min(20 * self.dim, 100)
         fixed_index = []
         if t0 is None:
             t0 = 0.005 * self.PhiP(P0, p=p)
@@ -1884,7 +1702,7 @@ class LHS(RandomGrid):
 
             # Inner loop
             for i in range(inner_loop):
-                modulo = (i + 1) % dim
+                modulo = (i + 1) % self.dim
                 l_P = list()
                 l_Phi = list()
 
@@ -1929,31 +1747,7 @@ class LHS(RandomGrid):
                     T = 0.9 * T
         return P_best
 
-    # def ese_mu(self, dim, n):
-    #     n_ese = int(self.split*n)
-    #     n_mu = n - n_ese
-    #     if(n_ese < 1):
-    #         n_mu = n_mu - 1
-    #         design = np.random.rand(1, dim)
-    #     elif(n_ese is 1):
-    #         design = np.random.rand(1, dim)
-    #     else:
-    #         design = self.lhs_ese(dim, n_ese)
-    #     design_rand = np.random.rand(n_mu, dim)
-    #     idxs = []
-    #     for i in range(n_mu):
-    #         mu_vals = []
-    #         idx_list = []
-    #         for j in [k for k in range(n_mu) if k not in idxs]:
-    #             a = np.vstack((design, design_rand[j]))
-    #             mu_vals.append(mutual_coherence(a))
-    #             idx_list.append(j)
-    #         mu_array = np.array(mu_vals)
-    #         idx_best = idx_list[np.argmin(mu_array)]
-    #         idxs.append(idx_best)
-    #         design = np.vstack((design, design_rand[idx_best]))
-    #
-    #     return design
+
 class MCMC(RandomGrid):
     """
     LHS grid object
@@ -2099,9 +1893,10 @@ class MCMC(RandomGrid):
         samples = samples[len(samples)-n: len(samples)]
         return samples
 
-class L1OPT(RandomGrid):
+
+class L1(RandomGrid):
     """
-    LHS grid object
+    L1 optimized grid object
 
     Parameters
     ----------
@@ -2132,7 +1927,14 @@ class L1OPT(RandomGrid):
     Examples
     --------
     >>> import pygpc
-    >>> grid = pygpc.LHS(parameters_random=parameters_random, n_grid=100, seed=1, options=options)
+    >>> grid = pygpc.L1(parameters_random=parameters_random,
+    >>>                 n_grid=100,
+    >>>                 seed=1,
+    >>>                 options={"method": "greedy",
+    >>>                          "criterion": ["mc"],
+    >>>                          "weights": [1],
+    >>>                          "n_pool": 1000,
+    >>>                          "seed": None})
 
     Attributes
     ----------
@@ -2144,7 +1946,12 @@ class L1OPT(RandomGrid):
         Seeding point to replicate random grid
     options: dict, optional, default=None
         Grid options:
-
+        - method: "greedy", "iteration"
+        - criterion: ["mc"], ["tmc", "cc"]
+        - weights: [1], [0.5, 0.5]
+        - n_pool: size of samples in pool to choose greedy results from
+        - n_iter: number of iterations
+        - seed: random seed
     coords : ndarray of float [n_grid_add x dim]
         Grid points to add (model space)
     coords_norm : ndarray of float [n_grid_add x dim]
@@ -2160,206 +1967,627 @@ class L1OPT(RandomGrid):
     """
 
     def __init__(self, parameters_random, n_grid=None, seed=None, options=None, coords=None, coords_norm=None,
-                 coords_gradient=None, coords_gradient_norm=None, coords_id=None, coords_gradient_id=None, gpc=None):
+                 coords_gradient=None, coords_gradient_norm=None, coords_id=None, coords_gradient_id=None, gpc=None,
+                 grid_pre=None):
         """
         Constructor; Initializes Grid instance; Generates grid or copies provided content
         """
+        if options is None:
+            options = dict()
 
-        self.lhs_reservoir = None
-        self.perc_mask = None
-        self.coords_reservoir = None
-        self.coords_norm_reservoir = None
+        if type(options) is dict:
+            if "weights" not in options.keys():
+                options["weights"] = [1]
 
-        super(L1OPT, self).__init__(parameters_random,
-                                   n_grid=n_grid,
-                                   seed=seed,
-                                   options=options,
-                                   coords=coords,
-                                   coords_norm=coords_norm,
-                                   coords_gradient=coords_gradient,
-                                   coords_gradient_norm=coords_gradient_norm,
-                                   coords_id=coords_id,
-                                   coords_gradient_id=coords_gradient_id)
+            if "method" not in options.keys():
+                options["method"] = "iteration"
 
+            if "n_pool" not in options.keys():
+                options["n_pool"] = 10000
 
-        if gpc is not None:
+            if "n_iter" not in options.keys():
+                options["n_iter"] = 1000
 
-            if self.options is None:
-                # self.factor = 10
-                self.random_pool = Random(parameters_random, n_grid=10000, seed=None)
-                self.coords_norm = self.random_pool.coords_norm[self.get_pool_samples(gpc)[1]]
+            if "seed" not in options.keys():
+                options["seed"] = None
 
-            elif self.options is 'greedy':
-                self.factor = 1000
-                self.random_pool = Random(parameters_random, n_grid=self.factor, seed=None)
-                self.coords_norm = self.random_pool.coords_norm[self.get_optimal_mu_greedy(gpc)]
+            if "criterion" not in options.keys():
+                options["criterion"] = ["mc"]
 
+        self.n_pool = options["n_pool"]
+        self.n_iter = options["n_iter"]
+        self.gpc = gpc
+        self.seed = options["seed"]
+        self.method = options["method"]
+        self.criterion = options["criterion"]
+        self.grid_pre = grid_pre
 
-            if (len(self.options) > 1 and (self.options[0] is 'ese_iter' or self.options[0] is 'ese_greedy')):
-                self.split = self.options[1]
-            #TODO: add option for n = 1
-            if self.n_grid > 1:
-                self.coords_reservoir = np.zeros((self.n_grid, self.dim))
-                self.coords_norm_reservoir = np.zeros((self.n_grid, self.dim))
-                self.perc_mask = np.zeros((self.n_grid, self.dim)).astype(bool)
+        if type(self.criterion) is not list:
+            self.criterion = [self.criterion]
 
-                # Generate random samples for each random input variable [n_grid x dim]
-                self.coords_norm = np.zeros([self.n_grid, self.dim])
+        super(L1, self).__init__(parameters_random,
+                                 n_grid=n_grid,
+                                 options=options,
+                                 coords=coords,
+                                 coords_norm=coords_norm,
+                                 coords_gradient=coords_gradient,
+                                 coords_gradient_norm=coords_gradient_norm,
+                                 coords_id=coords_id,
+                                 coords_gradient_id=coords_gradient_id)
 
-                # generate LHS grid in icdf space (seed of random grid (if necessary to reproduce random grid)
-                if self.options is 'ese_iter':
-                    self.coords_reservoir = self.ese_mu_greedy(dim=self.dim, n=self.n_grid, gpc=gpc)
-                if self.options is 'ese_greedy':
-                    self.coords_reservoir = self.ese_mu(dim=self.dim, n=self.n_grid, gpc=gpc)
-                # transform sample points from icdf to pdf space
-                for i_p, p in enumerate(self.parameters_random):
-                    self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(
-                        self.coords_reservoir[:, i_p])
-                    self.perc_mask[:, i_p] = np.logical_and(
-                        self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
-                        self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
+        self.weights = options["weights"]
 
-                # get points all satisfying perc constraints
-                self.perc_mask = self.perc_mask.all(axis=1)
-                self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
+        if self.method == "greedy" and self.n_grid > 0:
+            self.coords_norm = self.get_optimal_mu_greedy(grid_pre=self.grid_pre)
 
-                self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
+        elif (self.method == 'iteration' or self.method == 'iter') and self.n_grid > 0:
+            self.coords_norm = self.get_optimal_mu_iteration(grid_pre=self.grid_pre)
 
-                # Denormalize grid to original parameter space
-            self.coords = self.get_denormalized_coordinates(self.coords_norm)
-            # self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
+        # Denormalize grid to original parameter space
+        self.coords = self.get_denormalized_coordinates(self.coords_norm)
 
-            # Generate unique IDs of grid points
-            self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
+        # Generate unique IDs of grid points
+        self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
 
-            if self.options is 'iteration':
-                self.factor = 1000
-                self.coords, self.coords_norm, self.coords_id = self.get_optimal_mu_iteration(gpc, parameters_random)
+    def get_optimal_mu_greedy(self, grid_pre=None):
+        """
+        This function computes a set of grid points with minimal mutual coherence using an greedy approach.
 
+        Parameters
+        ----------
+        grid_pre : Grid object, optional, default: None
+            Grid object, which is going to be extended.
 
-    def get_optimal_mu_greedy(self, gpc):
+        Returns
+        -------
+        coords_norm : ndarray of float [n_grid x dim]
+            Normalized sample coordinates in range [-1, 1]
+        """
+        n_cpu = multiprocessing.cpu_count()
+        random_pool = Random(parameters_random=self.gpc.problem.parameters_random,
+                             n_grid=self.n_pool,
+                             options=self.options)
+
         index_list = []
-        psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.random_pool.coords_norm, gradient=False)
+        psy_pool = self.gpc.create_gpc_matrix(b=self.gpc.basis.b, x=random_pool.coords_norm, gradient=False)
         psy_pool = psy_pool / np.abs(psy_pool).max(axis=0)
-        m = self.n_grid
+        m = int(self.n_grid)
         m_p = int(np.shape(psy_pool)[0])
 
         # get random row of psy to start
         idx = np.random.randint(m_p)
         index_list.append(idx)
-        psy_opt = np.zeros([1, np.shape(psy_pool)[1]])
-        psy_opt[0, :] = psy_pool[idx, :]
+        index_list_remaining = [k for k in range(self.n_pool) if k not in index_list]
 
-        for i in range(1, m):
-            coh_list = []
-            idx_used = []
+        # set up multiprocessing
+        pool = multiprocessing.Pool(n_cpu)
 
-            for j in [k for k in range(m_p) if k not in index_list]:  # range(0, m_p):
+        # set starting point for iteration
+        if grid_pre is None or grid_pre.n_grid == 0:
+            psy_opt = np.zeros([1, np.shape(psy_pool)[1]])
+            psy_opt[0, :] = psy_pool[idx, :]
+            i_start = 1
+        else:
+            psy_opt = self.gpc.create_gpc_matrix(b=self.gpc.basis.b, x=grid_pre.coords_norm, gradient=False)
+            i_start = 1
 
-                new_row = psy_pool[j, :]
-                psy_temp = np.vstack((psy_opt[:i, :], new_row))
+        # loop over grid points
+        for i in range(i_start, m):
+            crit = np.ones((self.n_pool, len(self.criterion))) * 1e6
 
-                coh_list.append(mutual_coherence(psy_temp))
-                idx_used.append(j)
-                # calculate the minimal distance of both criteria from zero and get the index of its row in the pool matrix
-                if len(coh_list) > 1:
-                    idx_best = np.argmin(coh_list)
-                    index_list.append(idx_used[idx_best])
-                else:
-                    index_list.append(j)
-                    idx_best = j
+            workhorse_partial = partial(workhorse_greedy, psy_opt=psy_opt, psy_pool=psy_pool, criterion=self.criterion)
+            idx_list_chunks = compute_chunks(index_list_remaining, n_cpu)
 
-                # add row with best minimal coherence and cross correlation properties to the matrix
-                psy_opt = np.vstack((psy_opt[:i, :], psy_pool[idx_best, :]))
+            crit_tmp = pool.map(workhorse_partial, idx_list_chunks)
+            crit_tmp = np.concatenate(crit_tmp)
+            crit[index_list_remaining, :] = crit_tmp
 
-        return index_list
+            # set 1e6 dummy values to max values
+            for k in range(crit.shape[1]):
+                crit[crit[:, k] == 1e6, k] = np.max(crit[crit[:, k] != 1e6, k])
 
-    def get_pool_samples(self, gpc):
+            # normalize optimality criteria to [0, 1]
+            crit = (crit - np.min(crit, axis=0)) / (np.max(crit, axis=0) - np.min(crit, axis=0))
 
-        def t_averaged_mutual_coherence(array, t=0.2):
-            array = np.abs(array)
-            mask = array > t
+            # apply weights
+            crit = np.sum(crit * np.array(self.weights), axis=1)
 
-            return np.sum(array[mask]) / np.sum(mask)
-
-        def average_cross_correlation_gram(array):
-            n = array.shape[1]
-            k = n * (n - 1)
-            return (1 / k) * (np.linalg.norm(np.identity(n) - array) ** 2)
-
-        index_list = []
-
-        # create psy pool
-        psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=self.random_pool.coords_norm, gradient=False)
-        # weight psy pool with the weighting matrix
-        normalization_factor = 1 / np.abs(np.linalg.norm(psy_pool))
-        psy_pool = psy_pool / np.abs(psy_pool).max(axis=0)
-
-        # m is number of needed samples, m_p number of rows in pool matrix
-        m = self.n_grid
-        m_p = int(np.shape(psy_pool)[0])
-
-        # get random row of psy to start
-        idx = np.random.randint(m_p)
-        index_list.append(idx)
-        psy_opt = np.zeros([1, np.shape(psy_pool)[1]])
-        psy_opt[0, :] = psy_pool[idx, :]
-
-        for i in range(1, m):
-            coh1_list = []
-            coh_list = []
-            corr_list = []
-            gram_psy = None
-            idx_used = []
-
-            for j in [k for k in range(m_p) if k not in index_list]:  # range(0, m_p):
-
-                new_row = psy_pool[j, :]
-                psy_temp = np.vstack((psy_opt[:i, :], new_row))
-
-                # get gram matrix of column normalized psy_temp (update if present)
-                if gram_psy is None:
-                    gram_psy = np.matmul(psy_temp.T, psy_temp)
-
-                else:
-                    gram_psy = gram_psy \
-                               + np.matmul(new_row[:, np.newaxis], new_row[np.newaxis, :]) \
-                               - np.matmul(prev_row[:, np.newaxis], prev_row[np.newaxis, :])
-
-                prev_row = new_row
-
-                # get a list of the two criteria
-                coh_list.append(t_averaged_mutual_coherence(gram_psy))
-
-                corr_list.append(average_cross_correlation_gram(gram_psy))
-                # coh1_list.append(pygpc.mutual_coherence(psy_temp))
-                idx_used.append(j)
-            # calculate the minimal distance of both criteria from zero and get the index of its row in the pool matrix
-            if len(coh1_list) > 1:
-                coh_component = ((np.asarray(coh_list) - min(coh_list)) / (max(coh_list) - min(coh_list))) ** 2
-                corr_component = ((np.asarray(corr_list) - min(corr_list)) / (max(corr_list) - min(corr_list))) ** 2
-                dist_list = coh_component + (1 * corr_component)
-                idx_best = np.argmin(dist_list)
-                index_list.append(idx_used[idx_best])
-            else:
-                index_list.append(j)
-                idx_best = j
+            # find best index
+            index_list.append(np.argmin(crit))
 
             # add row with best minimal coherence and cross correlation properties to the matrix
-            psy_opt = np.vstack((psy_opt[:i, :], psy_pool[idx_best, :]))
+            psy_opt = np.vstack((psy_opt, psy_pool[index_list[-1], :]))
 
-        return psy_opt, index_list
+            # create list of remaining indices
+            index_list_remaining = [k for k in range(self.n_pool) if k not in index_list]
 
-    def get_optimal_mu_iteration(self, gpc, parameters_random):
+        coords_norm = random_pool.coords_norm[index_list, :]
 
-        mu = np.zeros(self.factor)
-        for i in self.factor:
-            sampling_pool = Random(parameters_random, n_grid=self.n_grid, seed=None)
-            psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=sampling_pool.coords_norm, gradient=False)
-            normalized_pool = psy_pool / np.abs(psy_pool).max(axis=0)
-            mu[i] = mutual_coherence(normalized_pool)
-            if np.argmin(mu) is i:
-                best_pool = sampling_pool
-        return best_pool.coords, best_pool.coords_norm, best_pool.coords_id
+        return coords_norm
+
+    def get_optimal_mu_iteration(self, grid_pre):
+        """
+        This function computes a set of grid points with minimal mutual coherence using an iterative approach.
+
+        Parameters
+        ----------
+        grid_pre : Grid object, optional, default: None
+            Grid object, which is going to be extended.
+
+        Returns
+        -------
+        coords_norm : ndarray of float [n_grid x dim]
+            Normalized sample coordinates in range [-1, 1]
+        """
+        n_cpu = multiprocessing.cpu_count()
+        coords_norm_list = []
+        crit = np.ones((self.n_iter, len(self.criterion))) * 1e6
+
+        # set up multiprocessing
+        pool = multiprocessing.Pool(n_cpu)
+        workhorse_partial = partial(workhorse_iteration,
+                                    gpc=self.gpc,
+                                    n_grid=self.n_grid,
+                                    criterion=self.criterion,
+                                    grid_pre=grid_pre)
+        idx_list_chunks = compute_chunks([k for k in range(self.n_iter)], n_cpu)
+
+        res = pool.map(workhorse_partial, idx_list_chunks)
+
+        for j in range(len(res)):
+            if j == 0:
+                crit = res[j][0]
+                coords_norm_list = res[j][1]
+            else:
+                crit = np.vstack((crit, res[j][0]))
+                coords_norm_list = coords_norm_list + res[j][1]
+
+        # normalize optimality criteria to [0, 1]
+        crit = (crit - np.min(crit, axis=0)) / (np.max(crit, axis=0) - np.min(crit, axis=0))
+
+        # apply weights
+        crit = np.sum(crit * np.array(self.weights), axis=1)
+
+        coords_norm = coords_norm_list[np.argmin(crit)]
+
+        return coords_norm
 
 
+class L1_LHS(RandomGrid):
+    """
+    L1-LHS optimized grid object
+
+    Parameters
+    ----------
+    parameters_random : OrderedDict of RandomParameter instances
+        OrderedDict containing the RandomParameter instances the grids are generated for
+    n_grid: int
+        Number of random samples to generate
+    seed: float
+        Seeding point to replicate random grids
+    options: dict, optional, default=None
+        Grid options:
+        - 'corr'            : optimizes design points in their spearman correlation coefficients
+        - 'maximin' or 'm'  : optimizes design points in their maximum minimal distance using the Phi-P criterion
+        - 'ese'             : uses an enhanced evolutionary algorithm to optimize the Phi-P criterion
+    coords : ndarray of float [n_grid_add x dim]
+        Grid points to add (model space)
+    coords_norm : ndarray of float [n_grid_add x dim]
+        Grid points to add (normalized space)
+    coords_gradient : ndarray of float [n_grid x dim x dim]
+        Denormalized coordinates xi
+    coords_gradient_norm : ndarray of float [n_grid x dim x dim]
+        Normalized coordinates xi
+    coords_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+    coords_gradient_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+
+    Examples
+    --------
+    >>> import pygpc
+    >>> grid = pygpc.L1_LHS(parameters_random=parameters_random,
+    >>>                     n_grid=100,
+    >>>                     gpc=gpc,
+    >>>                     options={"method": "greedy",
+    >>>                              "criterion": ["mc"],
+    >>>                              "weights_L1": [1],
+    >>>                              "weights": [0.25, 0.75],
+    >>>                              "n_pool": 1000,
+    >>>                              "seed": None})
+
+    Attributes
+    ----------
+    parameters_random : OrderedDict of RandomParameter instances
+        OrderedDict containing the RandomParameter instances the grids are generated for
+    n_grid : int or float
+        Number of random samples in grid
+    seed : float, optional, default=None
+        Seeding point to replicate random grid
+    options: dict, optional, default=None
+        Grid options:
+        - method: "greedy", "iteration"
+        - criterion: ["mc"], ["tmc", "cc"]
+        - weights: [1], [0.5, 0.5]
+        - n_pool: size of samples in pool to choose greedy results from
+        - n_iter: number of iterations
+        - seed: random seed
+    coords : ndarray of float [n_grid_add x dim]
+        Grid points to add (model space)
+    coords_norm : ndarray of float [n_grid_add x dim]
+        Grid points to add (normalized space)
+    coords_gradient : ndarray of float [n_grid x dim x dim]
+        Denormalized coordinates xi
+    coords_gradient_norm : ndarray of float [n_grid x dim x dim]
+        Normalized coordinates xi
+    coords_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+    coords_gradient_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+    """
+
+    def __init__(self, parameters_random, n_grid=None, options=None, coords=None, coords_norm=None,
+                 coords_gradient=None, coords_gradient_norm=None, coords_id=None, coords_gradient_id=None, gpc=None,
+                 grid_pre=None):
+        """
+        Constructor; Initializes Grid instance; Generates grid or copies provided content
+        """
+        if options is None:
+            options = dict()
+
+        if type(options) is dict:
+            if "weights" not in options.keys():
+                options["weights"] = [1]
+
+            if "method" not in options.keys():
+                options["method"] = "iteration"
+
+            if "n_pool" not in options.keys():
+                options["n_pool"] = 10000
+
+            if "n_iter" not in options.keys():
+                options["n_iter"] = 1000
+
+            if "seed" not in options.keys():
+                options["seed"] = None
+
+            if "criterion" not in options.keys():
+                options["criterion"] = ["mc"]
+
+            if "weights_mc" not in options.keys():
+                options["weights_L1"] = [1]
+
+        self.n_pool = options["n_pool"]
+        self.n_iter = options["n_iter"]
+        self.gpc = gpc
+        self.seed = options["seed"]
+        self.method = options["method"]
+        self.criterion = options["criterion"]
+        self.weights_L1 = options["weights_L1"]
+        self.grid_L1 = None
+        self.grid_LHS = None
+        self.grid_pre = grid_pre
+
+        if type(self.criterion) is not list:
+            self.criterion = [self.criterion]
+
+        super(L1_LHS, self).__init__(parameters_random,
+                                     n_grid=n_grid,
+                                     options=options,
+                                     coords=coords,
+                                     coords_norm=coords_norm,
+                                     coords_gradient=coords_gradient,
+                                     coords_gradient_norm=coords_gradient_norm,
+                                     coords_id=coords_id,
+                                     coords_gradient_id=coords_gradient_id)
+
+        self.weights = options["weights"]
+        self.n_grid_L1 = int(np.round(self.n_grid * self.weights[0]))
+        self.n_grid_LHS = self.n_grid - self.n_grid_L1
+
+        # create L1 grid
+        if self.n_grid_L1 > 0:
+            self.grid_L1 = L1(parameters_random=parameters_random,
+                              n_grid=self.n_grid_L1,
+                              gpc=gpc,
+                              grid_pre=grid_pre,
+                              options={"method": self.method,
+                                       "criterion": self.criterion,
+                                       "weights": self.weights_L1,
+                                       "n_pool": self.n_pool,
+                                       "n_iter": self.n_iter,
+                                       "seed": self.seed})
+
+            if self.grid_pre is not None:
+                self.grid_pre.coords_norm = np.vstack((self.grid_pre.coords_norm, self.grid_L1.coords_norm))
+                self.grid_pre.coords = np.vstack((self.grid_pre.coords, self.grid_L1.coords))
+                self.grid_pre.n_grid = self.grid_pre.coords_norm.shape[0]
+            else:
+                self.grid_pre = self.grid_L1
+
+        # create LHS (ese) grid
+        if self.n_grid_LHS > 0:
+            self.grid_LHS = LHS(parameters_random=self.gpc.problem.parameters_random,
+                                n_grid=self.n_grid_LHS,
+                                grid_pre=self.grid_pre,
+                                options="ese")
+
+        if self.grid_L1 is None and self.grid_LHS is not None:
+            self.coords_norm = self.grid_LHS.coords_norm
+        elif self.n_grid_L1 is not None and self.grid_LHS is None:
+            self.coords_norm = self.grid_L1.coords_norm
+        elif self.n_grid_L1 is not None and self.grid_LHS is not None:
+            self.coords_norm = np.vstack((self.grid_L1.coords_norm, self.grid_LHS.coords_norm))
+
+        # Denormalize grid to original parameter space
+        self.coords = self.get_denormalized_coordinates(self.coords_norm)
+
+        # Generate unique IDs of grid points
+        self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
+
+
+class LHS_L1(RandomGrid):
+    """
+    LHS-L1 optimized grid object
+
+    Parameters
+    ----------
+    parameters_random : OrderedDict of RandomParameter instances
+        OrderedDict containing the RandomParameter instances the grids are generated for
+    n_grid: int
+        Number of random samples to generate
+    options: dict, optional, default=None
+        Grid options:
+        - 'corr'            : optimizes design points in their spearman correlation coefficients
+        - 'maximin' or 'm'  : optimizes design points in their maximum minimal distance using the Phi-P criterion
+        - 'ese'             : uses an enhanced evolutionary algorithm to optimize the Phi-P criterion
+    coords : ndarray of float [n_grid_add x dim]
+        Grid points to add (model space)
+    coords_norm : ndarray of float [n_grid_add x dim]
+        Grid points to add (normalized space)
+    coords_gradient : ndarray of float [n_grid x dim x dim]
+        Denormalized coordinates xi
+    coords_gradient_norm : ndarray of float [n_grid x dim x dim]
+        Normalized coordinates xi
+    coords_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+    coords_gradient_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+
+    Examples
+    --------
+    >>> import pygpc
+    >>> grid = pygpc.LHS_L1(parameters_random=parameters_random,
+    >>>                     n_grid=100,
+    >>>                     gpc=gpc,
+    >>>                     options={"method": "greedy",
+    >>>                              "criterion": ["mc"],
+    >>>                              "weights_L1": [1],
+    >>>                              "weights": [0.25, 0.75],
+    >>>                              "n_pool": 1000,
+    >>>                              "seed": None})
+
+    Attributes
+    ----------
+    parameters_random : OrderedDict of RandomParameter instances
+        OrderedDict containing the RandomParameter instances the grids are generated for
+    n_grid : int or float
+        Number of random samples in grid
+    seed : float, optional, default=None
+        Seeding point to replicate random grid
+    options: dict, optional, default=None
+        Grid options:
+        - method: "greedy", "iteration"
+        - criterion: ["mc"], ["tmc", "cc"]
+        - weights: [1], [0.5, 0.5]
+        - n_pool: size of samples in pool to choose greedy results from
+        - n_iter: number of iterations
+        - seed: random seed
+    coords : ndarray of float [n_grid_add x dim]
+        Grid points to add (model space)
+    coords_norm : ndarray of float [n_grid_add x dim]
+        Grid points to add (normalized space)
+    coords_gradient : ndarray of float [n_grid x dim x dim]
+        Denormalized coordinates xi
+    coords_gradient_norm : ndarray of float [n_grid x dim x dim]
+        Normalized coordinates xi
+    coords_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+    coords_gradient_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+    """
+
+    def __init__(self, parameters_random, n_grid=None, options=None, coords=None, coords_norm=None,
+                 coords_gradient=None, coords_gradient_norm=None, coords_id=None, coords_gradient_id=None, gpc=None,
+                 grid_pre=None):
+        """
+        Constructor; Initializes Grid instance; Generates grid or copies provided content
+        """
+        if options is None:
+            options = dict()
+
+        if type(options) is dict:
+            if "weights" not in options.keys():
+                options["weights"] = [1]
+
+            if "method" not in options.keys():
+                options["method"] = "iteration"
+
+            if "n_pool" not in options.keys():
+                options["n_pool"] = 10000
+
+            if "n_iter" not in options.keys():
+                options["n_iter"] = 1000
+
+            if "seed" not in options.keys():
+                options["seed"] = None
+
+            if "criterion" not in options.keys():
+                options["criterion"] = ["mc"]
+
+            if "weights_mc" not in options.keys():
+                options["weights_L1"] = [1]
+
+        self.n_pool = options["n_pool"]
+        self.n_iter = options["n_iter"]
+        self.gpc = gpc
+        self.seed = options["seed"]
+        self.method = options["method"]
+        self.criterion = options["criterion"]
+        self.weights_L1 = options["weights_L1"]
+        self.grid_L1 = None
+        self.grid_LHS = None
+        self.grid_pre = grid_pre
+
+        if type(self.criterion) is not list:
+            self.criterion = [self.criterion]
+
+        super(LHS_L1, self).__init__(parameters_random,
+                                     n_grid=n_grid,
+                                     options=options,
+                                     coords=coords,
+                                     coords_norm=coords_norm,
+                                     coords_gradient=coords_gradient,
+                                     coords_gradient_norm=coords_gradient_norm,
+                                     coords_id=coords_id,
+                                     coords_gradient_id=coords_gradient_id)
+
+        self.weights = options["weights"]
+        self.n_grid_LHS = int(np.round(self.n_grid * self.weights[0]))
+        self.n_grid_L1 = self.n_grid - self.n_grid_LHS
+
+        # create LHS (ese) grid
+        if self.n_grid_LHS > 0:
+            self.grid_LHS = LHS(parameters_random=self.gpc.problem.parameters_random,
+                                n_grid=self.n_grid_LHS,
+                                grid_pre=grid_pre,
+                                options="ese")
+
+            if self.grid_pre is not None:
+                self.grid_pre.coords_norm = np.vstack((self.grid_pre.coords_norm, self.grid_LHS.coords_norm))
+                self.grid_pre.coords = np.vstack((self.grid_pre.coords, self.grid_LHS.coords))
+                self.grid_pre.n_grid = self.grid_pre.coords_norm.shape[0]
+            else:
+                self.grid_pre = self.grid_LHS
+
+        # create L1 grid
+        if self.n_grid_L1 > 0:
+            self.grid_L1 = L1(parameters_random=parameters_random,
+                              n_grid=self.n_grid_L1,
+                              grid_pre=self.grid_pre,
+                              gpc=gpc,
+                              options={"method": self.method,
+                                       "criterion": self.criterion,
+                                       "weights": self.weights_L1,
+                                       "n_pool": self.n_pool,
+                                       "n_iter": self.n_iter,
+                                       "seed": self.seed})
+
+        if self.grid_L1 is None and self.grid_LHS is not None:
+            self.coords_norm = self.grid_LHS.coords_norm
+        elif self.n_grid_L1 is not None and self.grid_LHS is None:
+            self.coords_norm = self.grid_L1.coords_norm
+        elif self.n_grid_L1 is not None and self.grid_LHS is not None:
+            self.coords_norm = np.vstack((self.grid_LHS.coords_norm, self.grid_L1.coords_norm))
+
+        # Denormalize grid to original parameter space
+        self.coords = self.get_denormalized_coordinates(self.coords_norm)
+
+        # Generate unique IDs of grid points
+        self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
+
+
+def workhorse_greedy(idx_list, psy_opt, psy_pool, criterion):
+    """
+    Workhorse for coherence calculation (greedy algorithm)
+
+    Parameters
+    ----------
+    idx_list : list of int [n_idx]
+        Indices of rows of pool matrix the coherence is calculated for
+    psy_opt : ndarray of float [n_grid_current, n_basis]
+        GPC matrix of previous iteration
+    psy_pool : ndarray of float [n_pool, n_basis]
+        GPC matrix of pool
+    criterion : list of str
+        Optimality criteria
+
+    Returns
+    -------
+    crit : ndarray of float [n_idx, n_criterion]
+        Optimality measures
+    """
+
+    crit = np.ones((len(idx_list), len(criterion))) * 1e6
+
+    for j in range(len(idx_list)):
+        psy_test = np.vstack((psy_opt, psy_pool[idx_list[j], :]))
+
+        if "mc" in criterion:
+            crit[j, criterion.index("mc")] = mutual_coherence(psy_test)
+
+        if "tmc" in criterion:
+            crit[j, criterion.index("tmc")] = t_averaged_mutual_coherence(np.matmul(psy_test.T, psy_test))
+
+        if "cc" in criterion:
+            crit[j, criterion.index("cc")] = average_cross_correlation_gram(np.matmul(psy_test.T, psy_test))
+
+    return crit
+
+
+def workhorse_iteration(idx_list, gpc, n_grid, criterion, grid_pre=None):
+    """
+    Workhorse for coherence calculation (greedy algorithm)
+
+    Parameters
+    ----------
+    idx_list : list of int [n_idx]
+        Indices of iterations
+    gpc : GPC object
+        GPC object
+    n_grid : int
+        Number of grid points
+    criterion : list of str
+        Optimality criteria
+    grid_pre : Grid object, optional, default: None
+        Grid object, which is going to be extended.
+
+    Returns
+    -------
+    crit : ndarray of float [n_idx, n_criterion]
+        Optimality measures
+    coords_norm_list : list [n_idx] of ndarray [n_grid x dim]
+        Normalized grid coordinates of grid realizations
+    """
+    coords_norm_list = []
+    crit = np.ones((len(idx_list), len(criterion))) * 1e6
+
+    for i in range(len(idx_list)):
+        test_grid = Random(parameters_random=gpc.problem.parameters_random,
+                           n_grid=n_grid)
+
+        # save current coords norm
+        coords_norm_list.append(test_grid.coords_norm)
+
+        if grid_pre is None or grid_pre.n_grid == 0:
+            coords_norm = test_grid.coords_norm
+        else:
+            coords_norm = np.vstack((grid_pre.coords_norm, test_grid.coords_norm))
+
+        # get the normalized gpc matrix
+        psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=coords_norm, gradient=False)
+        psy_pool_norm = psy_pool / np.abs(psy_pool).max(axis=0)
+
+        # test current matrix
+        if "mc" in criterion:
+            crit[i, criterion.index("mc")] = mutual_coherence(psy_pool_norm)
+
+        if "tmc" in criterion:
+            crit[i, criterion.index("tmc")] = t_averaged_mutual_coherence(
+                np.matmul(psy_pool_norm.T, psy_pool_norm))
+
+        if "cc" in criterion:
+            crit[i, criterion.index("cc")] = average_cross_correlation_gram(
+                np.matmul(psy_pool_norm.T, psy_pool_norm))
+
+    return crit, coords_norm_list

@@ -76,7 +76,6 @@ def validate_gpc_mc(session, coeffs, coords=None, data_original=None, n_samples=
         # Create sampling points
         grid_mc = Random(parameters_random=session.parameters_random,
                          n_grid=n_samples,
-                         seed=None,
                          options=None)
 
         coords_norm = grid_mc.coords_norm
@@ -98,7 +97,6 @@ def validate_gpc_mc(session, coeffs, coords=None, data_original=None, n_samples=
 
         grid_mc = Random(parameters_random=session.parameters_random,
                          n_grid=0,
-                         seed=None,
                          options=None)
         grid_mc.coords = coords
         coords_norm = grid_mc.get_normalized_coordinates(coords)
