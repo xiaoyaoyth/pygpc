@@ -1050,26 +1050,22 @@ class RandomGrid(Grid):
         dim = np.shape(array)[1]
         n_old = np.shape(array)[0]
         n_new = n_old + n_extend
-        a_new = np.zeros([n_extend, np.shape(array)[1]])
-        u = np.random.rand(n_new, np.shape(array)[1])
-        # array = np.insert(array, n_old, np.zeros([n_extend ,np.shape(array)[1]]), axis=0)
+        a_new = np.zeros([n_new, dim])
+        u = np.random.rand(n_new, dim)
         for d in range(dim):
             k = 0
-            s = 0
             for j in range(n_new - 1):
-                if not float(j / n_new) < float(np.sort(array[:, d])[min(int((j + s)), len(array) - 1)]) < float(
-                        (j + 1) / n_new):
-                    if float((j + 1) / n_new) <= float(np.sort(array[:, d])[min((j + s), len(array) - 1)]):
-                        s = s - 1
-                    else:
-                        j = j - 1
-                        s = s + 1
+                if not (float(j / n_new) < float(np.sort(array[:, d])[min(j, len(array) - 1)]) < float(
+                        (j + 1) / n_new)) and (float((j + 1) / n_new) <= float(np.sort(array[:, d])[min((j + 2), len(array) - 1)])):
+
                     k = k + 1
                     if k is np.shape(a_new)[0] + 1:
                         k = 1
                     a_new[k - 1, d] = float((j + u[j, d]) / n_new)
+
             np.random.shuffle(a_new[:, d])
-        return np.insert(array, n_old, a_new, axis=0)
+        a_extend = a_new[np.random.default_rng().choice(n_new, size=n_extend, replace=False), :]
+        return np.insert(array, n_old, a_extend, axis=0)
 
 
 class Random(RandomGrid):
