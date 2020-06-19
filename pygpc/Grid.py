@@ -874,6 +874,9 @@ class RandomGrid(Grid):
             if "seed" in options.keys():
                 self.seed = self.options["seed"]
 
+                # Seed of random grid (if necessary to reproduce random grid)
+                np.random.seed(self.seed)
+
     def extend_random_grid(self, n_grid_new=None, coords=None, coords_norm=None, classifier=None, domain=None,
                            gradient=False):
         """
@@ -930,41 +933,17 @@ class RandomGrid(Grid):
                         self.coords = np.vstack([self.coords, new_grid.coords])
                         self.coords_norm = np.vstack([self.coords_norm, new_grid.coords_norm])
 
-                    elif isinstance(self, L1):
-                        new_grid = L1(parameters_random=self.parameters_random,
-                                      n_grid=n_grid_add,
-                                      grid_pre=self,
-                                      gpc=self.gpc,
-                                      options=self.options)
+                    elif isinstance(self, L1) or isinstance(self, L1_LHS) or isinstance(self, LHS_L1) \
+                            or isinstance(self, FIM):
+                        new_grid = self.__class__(parameters_random=self.parameters_random,
+                                                  n_grid=n_grid_add,
+                                                  grid_pre=self,
+                                                  gpc=self.gpc,
+                                                  options=self.options)
 
                         # append points to existing grid
                         self.coords = np.vstack([self.coords, new_grid.coords])
                         self.coords_norm = np.vstack([self.coords_norm, new_grid.coords_norm])
-
-                    elif isinstance(self, L1_LHS):
-                        new_grid = L1_LHS(parameters_random=self.parameters_random,
-                                          n_grid=n_grid_add,
-                                          grid_pre=self,
-                                          gpc=self.gpc,
-                                          options=self.options)
-
-                        # append points to existing grid
-                        self.coords = np.vstack([self.coords, new_grid.coords])
-                        self.coords_norm = np.vstack([self.coords_norm, new_grid.coords_norm])
-
-                    elif isinstance(self, FIM):
-                        new_grid = FIM(parameters_random=self.parameters_random,
-                                       n_grid=n_grid_add,
-                                       grid_pre=self,
-                                       gpc=self.gpc,
-                                       options=self.options)
-
-                        # append points to existing grid
-                        self.coords = np.vstack([self.coords, new_grid.coords])
-                        self.coords_norm = np.vstack([self.coords_norm, new_grid.coords_norm])
-
-                    elif isinstance(self, LHS_L1):
-                        pass
                 else:
                     coords = np.zeros((n_grid_add, len(self.parameters_random)))
                     coords_norm = np.zeros((n_grid_add, len(self.parameters_random)))
@@ -1145,9 +1124,6 @@ class Random(RandomGrid):
             grid_present = False
 
         if not grid_present:
-            # Seed of random grid (if necessary to reproduce random grid)
-            if self.seed is not None:
-                np.random.seed(self.seed)
 
             # Generate random samples for each random input variable [n_grid x dim]
             try:
@@ -1323,7 +1299,7 @@ class LHS(RandomGrid):
             else:
                 self.criterion = ["ese"]
 
-        if self.criterion is not []:
+        if type(self.criterion) is not list:
             self.criterion = [self.criterion]
 
         super(LHS, self).__init__(parameters_random,
@@ -1588,7 +1564,9 @@ class LHS(RandomGrid):
         if self.grid_pre is not None:
             # transform normalized coordinates back to LHS-Space (0, 1)
             pre_coords_lhs = 1/2*(self.grid_pre.coords_norm + 1)
+
             return self.lhs_extend(pre_coords_lhs, self.n_grid)
+
         else:
             design = np.zeros([self.n_grid, self.dim])
 
@@ -2076,7 +2054,7 @@ class L1(RandomGrid):
 
         # set starting point for iteration
         if grid_pre is None or grid_pre.n_grid == 0:
-            psy_opt = np.zeros([1, np.shape(psy_pool)[1]])
+            psy_opt = np.zeros((1, psy_pool.shape[1]))
             psy_opt[0, :] = psy_pool[idx, :]
             i_start = 1
         else:
@@ -2199,7 +2177,6 @@ class FIM(RandomGrid):
     >>> import pygpc
     >>> grid = pygpc.FIM(parameters_random=parameters_random,
     >>>                  n_grid=100,
-    >>>                  seed=1,
     >>>                  options={"n_pool": 1000,
     >>>                           "seed": None})
 
@@ -2254,9 +2231,6 @@ class FIM(RandomGrid):
         self.gpc = gpc
         self.grid_pre = grid_pre
 
-        if type(self.criterion) is not list:
-            self.criterion = [self.criterion]
-
         super(FIM, self).__init__(parameters_random,
                                   n_grid=n_grid,
                                   options=options,
@@ -2272,10 +2246,10 @@ class FIM(RandomGrid):
         elif self.grid_pre is not None:
             self.gpc.gpc_matrix = self.gpc.create_gpc_matrix(b=self.gpc.basis.b, x=self.grid_pre.coords_norm, gradient=False)
         else:
-            grid_init = Random(parameters_random=self.gpc.problem.parameters_random,
-                               n_grid=1,
-                               options=self.options)
-            self.gpc.gpc_matrix = self.gpc.create_gpc_matrix(b=self.gpc.basis.b, x=grid_init.coords_norm, gradient=False)
+            self.gpc.grid = Random(parameters_random=self.gpc.problem.parameters_random,
+                                   n_grid=self.gpc.basis.n_basis,
+                                   options=self.options)
+            self.gpc.gpc_matrix = self.gpc.create_gpc_matrix(b=self.gpc.basis.b, x=self.gpc.grid.coords_norm, gradient=False)
 
         self.coords_norm = self.get_fim_optiomal_grid_points(n_grid_add=self.n_grid)
 
@@ -2323,18 +2297,23 @@ class FIM(RandomGrid):
         pool = multiprocessing.Pool(n_cpu)
 
         for i in range(n_grid_add):
+
             fim_matrix = self.calc_fim_matrix()
             grid_test = Random(parameters_random=self.gpc.problem.parameters_random,
                                n_grid=self.n_pool,
                                options=self.options)
 
-            workhorse_partial = partial(workhorse_get_det_updated_fim_matrix(gpc=self.gpc, fim_matrix=fim_matrix))
+            workhorse_partial = partial(workhorse_get_det_updated_fim_matrix, gpc=self.gpc, fim_matrix=fim_matrix)
             coords_norm_list_chunks = compute_chunks([c for c in grid_test.coords_norm], n_cpu)
 
             det = pool.map(workhorse_partial, coords_norm_list_chunks)
             det = np.concatenate(det)
 
-            coords_norm_opt[i, :] = grid_test.coords_norm[np.argmax(det), :]
+            coords_opt = grid_test.coords_norm[np.argmax(det), :]
+            self.gpc.grid.coords_norm = np.vstack((self.gpc.grid.coords_norm, coords_opt))
+            self.gpc.gpc_matrix = self.gpc.create_gpc_matrix(b=self.gpc.basis.b, x=self.gpc.grid.coords_norm, gradient=False)
+
+            coords_norm_opt[i, :] = coords_opt
 
         return coords_norm_opt
 
@@ -2347,7 +2326,7 @@ class FIM(RandomGrid):
         fim_matrix : ndarray of float [n_basis x n_basis]
             Fisher information matrix
         """
-        fim_matrix = np.zeros((self.gpc.shape[1], self.gpc.shape[1]))
+        fim_matrix = np.zeros((self.gpc.gpc_matrix.shape[1], self.gpc.gpc_matrix.shape[1]))
 
         for row in self.gpc.gpc_matrix:
             fim_matrix += np.outer(row, row)
@@ -2533,7 +2512,7 @@ class L1_LHS(RandomGrid):
             self.grid_LHS = LHS(parameters_random=self.gpc.problem.parameters_random,
                                 n_grid=self.n_grid_LHS,
                                 grid_pre=self.grid_pre,
-                                options="ese")
+                                options={"criterion": ["ese"]})
 
         if self.grid_L1 is None and self.grid_LHS is not None:
             self.coords_norm = self.grid_LHS.coords_norm
@@ -2684,7 +2663,7 @@ class LHS_L1(RandomGrid):
             self.grid_LHS = LHS(parameters_random=self.gpc.problem.parameters_random,
                                 n_grid=self.n_grid_LHS,
                                 grid_pre=grid_pre,
-                                options="ese")
+                                options={"criterion": ["ese"]})
 
             if self.grid_pre is not None:
                 self.grid_pre.coords_norm = np.vstack((self.grid_pre.coords_norm, self.grid_LHS.coords_norm))
@@ -2838,9 +2817,10 @@ def workhorse_get_det_updated_fim_matrix(coords_norm_list, fim_matrix, gpc):
         Determinant of updated Fisher Information matrix
     """
     det = np.zeros(len(coords_norm_list))
+    gpc.backend = "cpu"
 
     for i_c, c in enumerate(coords_norm_list):
-        new_row = gpc.create_gpc_matrix(b=gpc.basis.b, x=c, gradient=False)
+        new_row = gpc.create_gpc_matrix(b=gpc.basis.b, x=c[np.newaxis, :], gradient=False)
         fim_matrix += np.outer(new_row, new_row)
         det[i_c] = np.linalg.det(fim_matrix)
 

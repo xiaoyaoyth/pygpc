@@ -276,6 +276,11 @@ class GPC(object):
         else:
             raise NotImplementedError
 
+        if gpc_matrix.ndim == 1 and x.shape[0] == 1:
+            gpc_matrix = gpc_matrix[np.newaxis, :]
+        elif gpc_matrix.ndim == 1 and self.basis.n_basis == 1:
+            gpc_matrix = gpc_matrix[:, np.newaxis]
+
         return gpc_matrix
 
     def get_loocv(self, coeffs, results, gradient_results=None, error_norm="relative"):

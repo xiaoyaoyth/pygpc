@@ -374,7 +374,8 @@ class Static(Algorithm):
                                             n_grid=n_grid,
                                             options=self.options["grid_options"])
 
-        elif self.options["grid"] == L1 or self.options["grid"] == L1_LHS or self.options["grid"] == LHS_L1:
+        elif self.options["grid"] == L1 or self.options["grid"] == L1_LHS or self.options["grid"] == LHS_L1\
+                or self.options["grid"] == FIM:
             gpc.grid = self.options["grid"](parameters_random=self.problem.parameters_random,
                                             n_grid=n_grid,
                                             options=self.options["grid_options"],
@@ -1478,7 +1479,6 @@ class MEStaticProjection(Algorithm):
 
                     # extend grid
                     grid.extend_random_grid(n_grid_new=grid.n_grid-n_grid_domain+n_grid_new,
-                                            seed=self.options["seed"],
                                             classifier=megpc[i_qoi].classifier,
                                             domain=d)
 
@@ -1803,18 +1803,16 @@ class RegAdaptive(Algorithm):
         else:
             n_grid_init = gpc.basis.n_basis
 
-
-        if self.options["grid"] == L1:
+        if self.options["grid"] in [L1, L1_LHS, LHS_L1, FIM]:
             gpc.grid = self.options["grid"](parameters_random=self.problem.parameters_random,
-                                             n_grid=n_grid_init,
-                                             seed=self.options["seed"],
-                                             options=self.options["grid_options"], gpc=gpc)
+                                            n_grid=n_grid_init,
+                                            options=self.options["grid_options"],
+                                            gpc=gpc)
 
         else:
-            gpc.grid = grid(parameters_random=self.problem.parameters_random,
-                            n_grid=n_grid_init,
-                            seed=self.options["seed"],
-                            options=self.options["grid_options"])
+            gpc.grid = self.options["grid"](parameters_random=self.problem.parameters_random,
+                                            n_grid=n_grid_init,
+                                            options=self.options["grid_options"])
 
         gpc.solver = self.options["solver"]
         gpc.settings = self.options["settings"]
@@ -1893,7 +1891,7 @@ class RegAdaptive(Algorithm):
                             gpc.grid.n_grid, n_grid_new, n_grid_new - gpc.grid.n_grid),
                             tab=0, verbose=self.options["verbose"])
 
-                        gpc.grid.extend_random_grid(n_grid_new=n_grid_new, seed=None)
+                        gpc.grid.extend_random_grid(n_grid_new=n_grid_new)
 
                         # run simulations
                         iprint("Performing simulations " + str(i_grid + 1) + " to " + str(gpc.grid.coords.shape[0]),
@@ -2385,7 +2383,6 @@ class MERegAdaptiveProjection(Algorithm):
 
                     # extend random grid
                     grid.extend_random_grid(n_grid_new=grid.n_grid - np.sum(megpc[i_qoi].domains == d) + n_grid_reinit[d],
-                                            seed=None,
                                             domain=d)
 
                     megpc[i_qoi].grid = copy.deepcopy(grid)
@@ -2803,7 +2800,6 @@ class MERegAdaptiveProjection(Algorithm):
                                     # add grid points in this domain to global grid
                                     grid.extend_random_grid(
                                         n_grid_new=grid.n_grid - megpc[i_qoi].gpc[d].grid.n_grid + n_grid_new,
-                                        seed=None,
                                         classifier=megpc[i_qoi].classifier,
                                         domain=d,
                                         gradient=self.options["gradient_enhanced"])
@@ -3526,7 +3522,7 @@ class RegAdaptiveProjection(Algorithm):
                             iprint("Extending grid from {} to {} by {} sampling points".format(
                                 gpc[i_qoi].grid.n_grid, n_grid_new, n_grid_new - gpc[i_qoi].grid.n_grid),
                                 tab=0, verbose=self.options["verbose"])
-                            grid_original.extend_random_grid(n_grid_new=n_grid_new, seed=None)
+                            grid_original.extend_random_grid(n_grid_new=n_grid_new)
 
                             # run simulations
                             iprint("Performing simulations " + str(i_grid + 1) + " to " + str(grid_original.coords.shape[0]),
