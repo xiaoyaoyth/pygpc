@@ -52,6 +52,7 @@ class AbstractModel:
             - i_subiter   : current sub-iteration
             - coords      : parameters of particular simulation in original parameter space
             - coords_norm : parameters of particular simulation in normalized parameter space
+            - verbose     : print progress
         """
 
         self.p = p

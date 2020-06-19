@@ -3,12 +3,13 @@ import copy
 import numpy as np
 import scipy.stats
 from .io import iprint
+from .misc import compute_chunks
+from .misc import mutual_coherence
 from .misc import get_multi_indices
 from .misc import get_cartesian_product
-from .misc import mutual_coherence
 from .misc import t_averaged_mutual_coherence
 from .misc import average_cross_correlation_gram
-from .misc import compute_chunks
+from .misc import get_different_rows_from_matrices
 import multiprocessing.pool
 from _functools import partial
 
@@ -919,9 +920,6 @@ class RandomGrid(Grid):
                         self.coords_norm = np.vstack([self.coords_norm, new_grid.coords_norm])
 
                     elif isinstance(self, LHS):
-                        # append points to existing grid
-                        # self.coords = self.lhs_extend(self.coords_reservoir, n_grid_new)
-                        # self.coords_norm = np.vstack([self.coords_norm, self.coords_norm_reservoir[self.n_grid:n_grid_new]])
 
                         new_grid = LHS(parameters_random=self.parameters_random,
                                        n_grid=n_grid_add,
@@ -1023,6 +1021,21 @@ class RandomGrid(Grid):
             self.create_gradient_grid()
 
     def lhs_extend(self, array, n_extend):
+        """
+        Add sample points to already existing LHS samples
+
+        Parameters:
+        ---------
+        array: ndarray[m, n]
+            exsisting LHS samples whith m samples points per n dimensions
+        n_extend: int
+            number of new rows of samples needed
+        Return
+        ---------
+            returns a ndarray[m+n_extend, n] containing the existing LHS samples with added new ones
+        """
+
+
         dim = np.shape(array)[1]
         n_old = np.shape(array)[0]
         n_new = n_old + n_extend
@@ -1033,7 +1046,7 @@ class RandomGrid(Grid):
             k = 0
             s = 0
             for j in range(n_new - 1):
-                if not float(j / n_new) < float(np.sort(array[:, d])[min((j + s), len(array) - 1)]) < float(
+                if not float(j / n_new) < float(np.sort(array[:, d])[min(int((j + s)), len(array) - 1)]) < float(
                         (j + 1) / n_new):
                     if float((j + 1) / n_new) <= float(np.sort(array[:, d])[min((j + s), len(array) - 1)]):
                         s = s - 1
@@ -1229,13 +1242,13 @@ class LHS(RandomGrid):
         OrderedDict containing the RandomParameter instances the grids are generated for
     n_grid: int
         Number of random samples to generate
-    seed: float
-        Seeding point to replicate random grids
     options: dict, optional, default=None
         Grid options:
-        - 'corr'            : optimizes design points in their spearman correlation coefficients
-        - 'maximin' or 'm'  : optimizes design points in their maximum minimal distance using the Phi-P criterion
-        - 'ese'             : uses an enhanced evolutionary algorithm to optimize the Phi-P criterion
+        - criterion :
+            - 'corr'            : optimizes design points in their spearman correlation coefficients
+            - 'maximin' or 'm'  : optimizes design points in their maximum minimal distance using the Phi-P criterion
+            - 'ese'             : uses an enhanced evolutionary algorithm to optimize the Phi-P criterion
+        - seed : Seeding point to replicate random grids
     coords : ndarray of float [n_grid_add x dim]
         Grid points to add (model space)
     coords_norm : ndarray of float [n_grid_add x dim]
@@ -1344,7 +1357,11 @@ class LHS(RandomGrid):
             Unique IDs of grid points
         """
         if n_grid > 0:
-            n_grid_lhs = self.n_grid
+            if self.grid_pre is None:
+                n_grid_lhs = self.n_grid
+            else:
+                n_grid_lhs = self.n_grid + self.grid_pre.n_grid
+
             self.coords_reservoir = np.zeros((n_grid_lhs, self.dim))
             self.coords_norm_reservoir = np.zeros((n_grid_lhs, self.dim))
             self.perc_mask = np.zeros((n_grid_lhs, self.dim)).astype(bool)
@@ -1356,34 +1373,21 @@ class LHS(RandomGrid):
             # Generate random samples for each random input variable [n_grid x dim]
             self.coords_norm = np.zeros([self.n_grid, self.dim])
 
-            # generate LHS grid in icdf space (seed of random grid (if necessary to reproduce random grid)
-            self.lhs_reservoir = self.get_lhs_grid()
-
-            # transform sample points from icdf to pdf space
-            for i_p, p in enumerate(self.parameters_random):
-                self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(self.lhs_reservoir[:, i_p])
-                self.perc_mask[:, i_p] = np.logical_and(
-                    self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
-                    self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
-
-            # get points all satisfying perc constraints
-            self.perc_mask = self.perc_mask.all(axis=1)
-            self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
-
-            self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
+            # generate LHS coordinates
+            self.get_lhs_grid()
 
         else:
-            self.coords_norm = Random(parameters_random=self.parameters_random,
-                                      n_grid=self.n_grid,
-                                          options=self.options)
+            random_grid = Random(parameters_random=self.parameters_random,
+                                 n_grid=self.n_grid,
+                                 options=self.options)
+            self.coords_norm = random_grid.coords_norm
 
-            # Denormalize grid to original parameter space
-            self.coords = self.get_denormalized_coordinates(self.coords_norm)
-            self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
+        # Denormalize grid to original parameter space
+        self.coords = self.get_denormalized_coordinates(self.coords_norm)
+        self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
 
-            # Generate unique IDs of grid points
-            self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
-
+        # Generate unique IDs of grid points
+        self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
 
     def CL2(self, array):
         """
@@ -1508,7 +1512,7 @@ class LHS(RandomGrid):
         while i2 == i1 or i2 in fixed_index:
             i2 = np.random.randint(P.shape[0])
 
-        P_ = np.delete(P, [i1, i2], axis=0)
+        P_= np.delete(P, [i1, i2], axis=0)
 
         dist1 = scipy.spatial.distance.cdist([P[i1, :]], P_)
         dist2 = scipy.spatial.distance.cdist([P[i2, :]], P_)
@@ -1524,47 +1528,49 @@ class LHS(RandomGrid):
         """
         Create samples in an m*n matrix using Latin Hypercube Sampling [1].
 
-        Parameters
-        ----------
-        dim : int
-            Number of random variables
-        n : int
-            Number of sampling points
-        criterion : str, optional, default: None (regular LHS)
-            Criterion of LHS grid:
-            - 'corr' - optimizes design points in their spearman correlation coefficients
-            - 'maximin' or 'm' - optimizes design points in their maximum minimal distance using the Phi-P criterion
-            - 'ese' -  uses an enhanced evolutionary algorithm to optimize the Phi-P criterion
-
-        Returns
-        -------
-        design : ndarray of float [n_grid, n_dim]
-            LHS grid points
-
         Notes
         -----
         .. [1] McKay, M. D., Beckman, R. J., & Conover, W. J. (2000). A comparison of three methods for selecting
            values of input variables in the analysis of output from a computer code. Technometrics, 42(1), 55-61.
         """
-        if self.criterion is 'corr':
-            return self.lhs_corr()
-        elif self.criterion is 'maximin' or self.criterion is 'm':
-            return self.lhs_maximin()
-        elif self.criterion is 'ese':
-            return self.lhs_ese()
+
+        # create sample points in icdf space using specified criteria
+        if self.criterion[0] is 'corr':
+            self.lhs_reservoir = self.lhs_corr()
+        elif self.criterion[0] is 'maximin' or self.criterion is 'm':
+            self.lhs_reservoir = self.lhs_maximin()
+        elif self.criterion[0] is 'ese':
+            # reservoir_list= []
+            # PhiP_ese_list = []
+            # for i in range(5):
+            #     reservoir_list.append(self.lhs_ese())
+            #     PhiP_ese_list.append(self.PhiP(reservoir_list[i]))
+            # idx_best = np.argmin(PhiP_ese_list)
+            # self.lhs_reservoir = reservoir_list[idx_best]
+            self.lhs_reservoir = self.lhs_ese()
         else:
-            return self.lhs_initial()
+            self.lhs_reservoir = self.lhs_initial()
+
+        # transform sample points from icdf to pdf space
+        for i_p, p in enumerate(self.parameters_random):
+            self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(self.lhs_reservoir[:, i_p])
+            self.perc_mask[:, i_p] = np.logical_and(
+                self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
+                self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
+
+        # get points all satisfying perc constraints
+        self.perc_mask = self.perc_mask.all(axis=1)
+        self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
+
+        if self.grid_pre is not None:
+            self.coords_norm_reservoir = get_different_rows_from_matrices(self.grid_pre.coords_norm,
+                                                                              self.coords_norm_reservoir)
+
+        self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
 
     def lhs_initial(self):
         """
         Construct an initial LHS grid
-
-        Parameters
-        ----------
-        dim : int
-            Number of random variables
-        n : int
-            Number of sampling points
 
         Returns
         -------
@@ -1572,7 +1578,9 @@ class LHS(RandomGrid):
             LHS grid points
         """
         if self.grid_pre is not None:
-            return self.lhs_extend(self.grid_pre, self.n_grid)
+            # transform normalized coordinates back to LHS-Space (0, 1)
+            pre_coords_lhs = 1/2*(self.grid_pre.coords_norm + 1)
+            return self.lhs_extend(pre_coords_lhs, self.n_grid)
         else:
             design = np.zeros([self.n_grid, self.dim])
 
@@ -1656,19 +1664,10 @@ class LHS(RandomGrid):
         """
         Create optimized LHS grid using a enhanced stochastic evolutionary algorithm for the PhiP Maximin criterion [1]
 
-        Parameters
-        ----------
-        dim : int
-            Number of random variables
-        n : int
-            Number of sampling points
-        t0 : int, optional, default: None
-            Threshold parameter
-
         Returns
         -------
         design : ndarray of float [n, n_dim]
-            LHS grid points
+            With ESE Algorithm for minimal Phi-P optimized grid points
 
         Notes
         -----
@@ -1684,7 +1683,12 @@ class LHS(RandomGrid):
         p = 10
         outer_loop = min(int(1.5 * self.dim), 30)
         inner_loop = min(20 * self.dim, 100)
-        fixed_index = []
+
+        if self.grid_pre is not None:
+            fixed_index = [*range(self.grid_pre.coords_norm.shape[0])]
+        else:
+            fixed_index = []
+
         if t0 is None:
             t0 = 0.005 * self.PhiP(P0, p=p)
 
@@ -2575,7 +2579,10 @@ def workhorse_iteration(idx_list, gpc, n_grid, criterion, grid_pre=None):
             coords_norm = np.vstack((grid_pre.coords_norm, test_grid.coords_norm))
 
         # get the normalized gpc matrix
+        backend_backup = gpc.backend
+        gpc.backend = "cpu"
         psy_pool = gpc.create_gpc_matrix(b=gpc.basis.b, x=coords_norm, gradient=False)
+        gpc.backend = backend_backup
         psy_pool_norm = psy_pool / np.abs(psy_pool).max(axis=0)
 
         # test current matrix

@@ -156,7 +156,37 @@ def get_rotation_matrix(theta):
 
     return rotation_matrix
 
-    
+
+def get_different_rows_from_matrices(a, b):
+    """
+    Compares rows from matrix a with rows from matrix b. It is assumed that b contains rows from a.
+    The function returns the rows of b, which are not included in a.
+
+    Parameters
+    ----------
+    a : ndarray of float [m1 x n]
+        First matrix (usually the smaller one), where rows are part of b
+    b : ndarray of float [m2 x n]
+        Second matrix (usually the larger one), containing rows of a
+
+    Returns
+    -------
+    b_diff : ndarray of float [m3 x n]
+        Rows from b differing from a
+    """
+    idx_in = []
+
+    for _a in a:
+        for i_b, _b in enumerate(b):
+            if (_a == _b).all():
+                idx_in.append(i_b)
+
+    idx = np.arange(b.shape[0])
+    idx_not_in = [i for i in idx if i not in idx_in]
+
+    return b[idx_not_in, :]
+
+
 def get_list_multi_delete(input_list, index):
     """
     Delete multiple entries from list.

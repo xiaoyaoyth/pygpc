@@ -401,7 +401,8 @@ class Static(Algorithm):
                       i_iter=gpc.order_max,
                       i_subiter=gpc.interaction_order,
                       fn_results=None,
-                      print_func_time=self.options["print_func_time"])
+                      print_func_time=self.options["print_func_time"],
+                      verbose=self.options["verbose"])
 
         iprint('Total parallel function evaluation: ' + str(time.time() - start_time) + ' sec',
                tab=0, verbose=self.options["verbose"])
@@ -422,7 +423,8 @@ class Static(Algorithm):
                                                      i_subiter=gpc.interaction_order,
                                                      print_func_time=self.options["print_func_time"],
                                                      dx=self.options["gradient_calculation_options"]["dx"],
-                                                     distance_weight=self.options["gradient_calculation_options"]["distance_weight"])
+                                                     distance_weight=self.options["gradient_calculation_options"]["distance_weight"],
+                                                     verbose=self.options["verbose"])
 
             iprint('Gradient evaluation: ' + str(time.time() - start_time) + ' sec',
                    tab=0, verbose=self.options["verbose"])
@@ -626,7 +628,8 @@ class MEStatic(Algorithm):
                           i_iter=self.options["order_max"],
                           i_subiter=self.options["interaction_order"],
                           fn_results=None,
-                          print_func_time=self.options["print_func_time"])
+                          print_func_time=self.options["print_func_time"],
+                          verbose=self.options["verbose"])
 
         iprint('Total parallel function evaluation: ' + str(time.time() - start_time) + ' sec',
                tab=0, verbose=self.options["verbose"])
@@ -654,7 +657,8 @@ class MEStatic(Algorithm):
                                                          i_subiter=self.options["interaction_order"],
                                                          print_func_time=self.options["print_func_time"],
                                                          dx=self.options["gradient_calculation_options"]["dx"],
-                                                         distance_weight=self.options["gradient_calculation_options"]["distance_weight"])
+                                                         distance_weight=self.options["gradient_calculation_options"]["distance_weight"],
+                                                         verbose=self.options["verbose"])
 
             iprint('Gradient evaluation: ' + str(time.time() - start_time) + ' sec',
                    tab=0, verbose=self.options["verbose"])
@@ -954,7 +958,8 @@ class StaticProjection(Algorithm):
                           i_iter=self.options["order_max"],
                           i_subiter=self.options["interaction_order"],
                           fn_results=None,
-                          print_func_time=self.options["print_func_time"])
+                          print_func_time=self.options["print_func_time"],
+                          verbose=self.options["verbose"])
 
         iprint('Total function evaluation: ' + str(time.time() - start_time) + ' sec',
                tab=0, verbose=self.options["verbose"])
@@ -974,7 +979,8 @@ class StaticProjection(Algorithm):
                                                      i_subiter=self.options["interaction_order"],
                                                      print_func_time=self.options["print_func_time"],
                                                      dx=1e-3,
-                                                     distance_weight=None)
+                                                     distance_weight=None,
+                                                     verbose=self.options["verbose"])
 
         iprint('Gradient evaluation: ' + str(time.time() - start_time) + ' sec',
                tab=0, verbose=self.options["verbose"])
@@ -1062,7 +1068,8 @@ class StaticProjection(Algorithm):
                                   i_iter=self.options["order_max"],
                                   i_subiter=self.options["interaction_order"],
                                   fn_results=None,
-                                  print_func_time=self.options["print_func_time"])
+                                  print_func_time=self.options["print_func_time"],
+                                  verbose=self.options["verbose"])
 
                 res_all = np.vstack((res_all, res_new))
 
@@ -1085,7 +1092,8 @@ class StaticProjection(Algorithm):
                                                                  i_subiter=self.options["interaction_order"],
                                                                  print_func_time=self.options["print_func_time"],
                                                                  dx=self.options["gradient_calculation_options"]["dx"],
-                                                                 distance_weight=self.options["gradient_calculation_options"]["distance_weight"])
+                                                                 distance_weight=self.options["gradient_calculation_options"]["distance_weight"],
+                                                                 verbose=self.options["verbose"])
 
                     iprint('Gradient evaluation: ' + str(time.time() - start_time) + ' sec',
                            tab=0, verbose=self.options["verbose"])
@@ -1348,7 +1356,8 @@ class MEStaticProjection(Algorithm):
                           i_iter=self.options["order_max"],
                           i_subiter=self.options["interaction_order"],
                           fn_results=None,
-                          print_func_time=self.options["print_func_time"])
+                          print_func_time=self.options["print_func_time"],
+                          verbose=self.options["verbose"])
 
         iprint('Total function evaluation: ' + str(time.time() - start_time) + ' sec',
                tab=0, verbose=self.options["verbose"])
@@ -1367,7 +1376,8 @@ class MEStaticProjection(Algorithm):
                                                      i_subiter=self.options["interaction_order"],
                                                      print_func_time=self.options["print_func_time"],
                                                      dx=1e-3,
-                                                     distance_weight=None)
+                                                     distance_weight=None,
+                                                     verbose=self.options["verbose"])
 
         iprint('Gradient evaluation: ' + str(time.time() - start_time) + ' sec',
                tab=0, verbose=self.options["verbose"])
@@ -1485,7 +1495,8 @@ class MEStaticProjection(Algorithm):
                                       i_iter=self.options["order_max"],
                                       i_subiter=self.options["interaction_order"],
                                       fn_results=None,
-                                      print_func_time=self.options["print_func_time"])
+                                      print_func_time=self.options["print_func_time"],
+                                      verbose=self.options["verbose"])
 
                     res_all = np.vstack((res_all, res_new))
 
@@ -1508,7 +1519,8 @@ class MEStaticProjection(Algorithm):
                                                                      i_subiter=self.options["interaction_order"],
                                                                      print_func_time=self.options["print_func_time"],
                                                                      dx=self.options["gradient_calculation_options"]["dx"],
-                                                                     distance_weight=self.options["gradient_calculation_options"]["distance_weight"])
+                                                                     distance_weight=self.options["gradient_calculation_options"]["distance_weight"],
+                                                                     verbose=self.options["verbose"])
 
                         iprint('Gradient evaluation: ' + str(time.time() - start_time) + ' sec',
                                tab=0, verbose=self.options["verbose"])
@@ -1896,7 +1908,8 @@ class RegAdaptive(Algorithm):
                                           i_iter=basis_order[0],
                                           i_subiter=basis_order[1],
                                           fn_results=gpc.fn_results,
-                                          print_func_time=self.options["print_func_time"])
+                                          print_func_time=self.options["print_func_time"],
+                                          verbose=self.options["verbose"])
 
                         iprint('Total parallel function evaluation: ' + str(time.time() - start_time) + ' sec',
                                tab=0, verbose=self.options["verbose"])
@@ -1922,7 +1935,8 @@ class RegAdaptive(Algorithm):
                                                                      i_subiter=basis_order[1],
                                                                      print_func_time=self.options["print_func_time"],
                                                                      dx=self.options["gradient_calculation_options"]["dx"],
-                                                                     distance_weight=self.options["gradient_calculation_options"]["distance_weight"])
+                                                                     distance_weight=self.options["gradient_calculation_options"]["distance_weight"],
+                                                                     verbose=self.options["verbose"])
 
                             if self.options["gradient_calculation"] == "FD_fwd":
                                 gradient_idx_FD_fwd = gradient_idx
@@ -2200,7 +2214,8 @@ class MERegAdaptiveProjection(Algorithm):
                           i_iter=self.options["order_start"],
                           i_subiter=self.options["interaction_order"],
                           fn_results=self.options["fn_results"],  # + "_temp"
-                          print_func_time=self.options["print_func_time"])
+                          print_func_time=self.options["print_func_time"],
+                          verbose=self.options["verbose"])
 
         i_grid = grid.n_grid
 
@@ -2241,7 +2256,8 @@ class MERegAdaptiveProjection(Algorithm):
                                                          i_subiter=self.options["interaction_order"],
                                                          print_func_time=self.options["print_func_time"],
                                                          dx=dx,
-                                                         distance_weight=distance_weight)
+                                                         distance_weight=distance_weight,
+                                                         verbose=self.options["verbose"])
 
             if method == "FD_fwd":
                 gradient_idx_FD_fwd = gradient_idx
@@ -2390,7 +2406,8 @@ class MERegAdaptiveProjection(Algorithm):
                                   i_iter=None,
                                   i_subiter=None,
                                   fn_results=self.options["fn_results"],
-                                  print_func_time=self.options["print_func_time"])
+                                  print_func_time=self.options["print_func_time"],
+                                  verbose=self.options["verbose"])
 
                 # add results to results array
                 res_all = np.vstack((res_all, res_new))
@@ -2424,7 +2441,8 @@ class MERegAdaptiveProjection(Algorithm):
                                                                  i_subiter=None,
                                                                  print_func_time=self.options["print_func_time"],
                                                                  dx=dx,
-                                                                 distance_weight=distance_weight)
+                                                                 distance_weight=distance_weight,
+                                                                 verbose=self.options["verbose"])
 
                     if method == "FD_fwd":
                         gradient_idx_FD_fwd = gradient_idx
@@ -2505,7 +2523,8 @@ class MERegAdaptiveProjection(Algorithm):
                                    i_iter="Domain boundary",
                                    i_subiter=None,
                                    fn_results=self.options["fn_results"],
-                                   print_func_time=self.options["print_func_time"])
+                                   print_func_time=self.options["print_func_time"],
+                                   verbose=self.options["verbose"])
 
                 iprint('Total function evaluation: ' + str(time.time() - start_time) + ' sec',
                        tab=0, verbose=self.options["verbose"])
@@ -2529,7 +2548,8 @@ class MERegAdaptiveProjection(Algorithm):
                                                                  i_subiter=None,
                                                                  print_func_time=self.options["print_func_time"],
                                                                  dx=self.options["gradient_calculation_options"]["dx"],
-                                                                 distance_weight=self.options["gradient_calculation_options"]["distance_weight"])
+                                                                 distance_weight=self.options["gradient_calculation_options"]["distance_weight"],
+                                                                 verbose=self.options["verbose"])
 
                     if self.options["gradient_calculation"] == "FD_fwd":
                         gradient_idx_FD_fwd = gradient_idx
@@ -2802,7 +2822,8 @@ class MERegAdaptiveProjection(Algorithm):
                                                       i_iter=basis_order["poly_dom_{}".format(d)][0],
                                                       i_subiter=basis_order["poly_dom_{}".format(d)][1],
                                                       fn_results=self.options["fn_results"],
-                                                      print_func_time=self.options["print_func_time"])
+                                                      print_func_time=self.options["print_func_time"],
+                                                      verbose=self.options["verbose"])
 
                                     iprint('Total parallel function evaluation {} sec'.format(
                                         str(time.time() - start_time)),
@@ -2826,7 +2847,8 @@ class MERegAdaptiveProjection(Algorithm):
                                                                                      i_subiter=basis_order["poly_dom_{}".format(d)][1],
                                                                                      print_func_time=self.options["print_func_time"],
                                                                                      dx=self.options["gradient_calculation_options"]["dx"],
-                                                                                     distance_weight=self.options["gradient_calculation_options"]["distance_weight"])
+                                                                                     distance_weight=self.options["gradient_calculation_options"]["distance_weight"],
+                                                                                     verbose=self.options["verbose"])
 
                                         if self.options["gradient_calculation"] == "FD_fwd":
                                             gradient_idx_FD_fwd = gradient_idx
@@ -3306,7 +3328,8 @@ class RegAdaptiveProjection(Algorithm):
                           i_iter=self.options["order_start"],
                           i_subiter=self.options["interaction_order"],
                           fn_results=self.options["fn_results"],
-                          print_func_time=self.options["print_func_time"])
+                          print_func_time=self.options["print_func_time"],
+                          verbose=self.options["verbose"])
 
         i_grid = grid_original.n_grid
 
@@ -3328,7 +3351,8 @@ class RegAdaptiveProjection(Algorithm):
                                                      i_subiter=self.options["interaction_order"],
                                                      print_func_time=self.options["print_func_time"],
                                                      dx=1e-3,
-                                                     distance_weight=None)
+                                                     distance_weight=None,
+                                                     verbose=self.options["verbose"])
 
         gradient_idx_FD_fwd = gradient_idx
         grad_res_3D_all_FD_fwd = grad_res_3D_all
@@ -3516,7 +3540,8 @@ class RegAdaptiveProjection(Algorithm):
                                               i_iter=basis_order[0],
                                               i_subiter=basis_order[1],
                                               fn_results=gpc[i_qoi].fn_results,
-                                              print_func_time=self.options["print_func_time"])
+                                              print_func_time=self.options["print_func_time"],
+                                              verbose=self.options["verbose"])
 
                             res_all = np.vstack((res_all, res_new))
 
@@ -3540,7 +3565,8 @@ class RegAdaptiveProjection(Algorithm):
                                                                              i_subiter=basis_order[1],
                                                                              print_func_time=self.options["print_func_time"],
                                                                              dx=self.options["gradient_calculation_options"]["dx"],
-                                                                             distance_weight=self.options["gradient_calculation_options"]["distance_weight"])
+                                                                             distance_weight=self.options["gradient_calculation_options"]["distance_weight"],
+                                                                             verbose=self.options["verbose"])
 
                                 if self.options["gradient_calculation"] == "FD_fwd":
                                     gradient_idx_FD_fwd = gradient_idx
