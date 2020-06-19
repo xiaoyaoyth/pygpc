@@ -952,6 +952,17 @@ class RandomGrid(Grid):
                         self.coords = np.vstack([self.coords, new_grid.coords])
                         self.coords_norm = np.vstack([self.coords_norm, new_grid.coords_norm])
 
+                    elif isinstance(self, FIM):
+                        new_grid = FIM(parameters_random=self.parameters_random,
+                                       n_grid=n_grid_add,
+                                       grid_pre=self,
+                                       gpc=self.gpc,
+                                       options=self.options)
+
+                        # append points to existing grid
+                        self.coords = np.vstack([self.coords, new_grid.coords])
+                        self.coords_norm = np.vstack([self.coords_norm, new_grid.coords_norm])
+
                     elif isinstance(self, LHS_L1):
                         pass
                 else:
@@ -1059,6 +1070,7 @@ class RandomGrid(Grid):
                     a_new[k - 1, d] = float((j + u[j, d]) / n_new)
             np.random.shuffle(a_new[:, d])
         return np.insert(array, n_old, a_new, axis=0)
+
 
 class Random(RandomGrid):
     """
@@ -2157,6 +2169,217 @@ class L1(RandomGrid):
         return coords_norm
 
 
+class FIM(RandomGrid):
+    """
+    FIM D-optimal grid object
+
+    Parameters
+    ----------
+    parameters_random : OrderedDict of RandomParameter instances
+        OrderedDict containing the RandomParameter instances the grids are generated for
+    n_grid: int
+        Number of random samples to generate
+    seed: float
+        Seeding point to replicate random grids
+    options: dict, optional, default=None
+        Grid options:
+        - 'n_pool'   : number of random samples to determine next optimal grid point
+        - 'seed'     : random seed
+    coords : ndarray of float [n_grid_add x dim]
+        Grid points to add (model space)
+    coords_norm : ndarray of float [n_grid_add x dim]
+        Grid points to add (normalized space)
+    coords_gradient : ndarray of float [n_grid x dim x dim]
+        Denormalized coordinates xi
+    coords_gradient_norm : ndarray of float [n_grid x dim x dim]
+        Normalized coordinates xi
+    coords_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+    coords_gradient_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+
+    Examples
+    --------
+    >>> import pygpc
+    >>> grid = pygpc.FIM(parameters_random=parameters_random,
+    >>>                  n_grid=100,
+    >>>                  seed=1,
+    >>>                  options={"n_pool": 1000,
+    >>>                           "seed": None})
+
+    Attributes
+    ----------
+    parameters_random : OrderedDict of RandomParameter instances
+        OrderedDict containing the RandomParameter instances the grids are generated for
+    n_grid : int or float
+        Number of random samples in grid
+    seed : float, optional, default=None
+        Seeding point to replicate random grid
+    options: dict, optional, default=None
+        Grid options:
+        - method: "greedy", "iteration"
+        - criterion: ["mc"], ["tmc", "cc"]
+        - weights: [1], [0.5, 0.5]
+        - n_pool: size of samples in pool to choose greedy results from
+        - n_iter: number of iterations
+        - seed: random seed
+    coords : ndarray of float [n_grid_add x dim]
+        Grid points to add (model space)
+    coords_norm : ndarray of float [n_grid_add x dim]
+        Grid points to add (normalized space)
+    coords_gradient : ndarray of float [n_grid x dim x dim]
+        Denormalized coordinates xi
+    coords_gradient_norm : ndarray of float [n_grid x dim x dim]
+        Normalized coordinates xi
+    coords_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+    coords_gradient_id : list of UUID objects (version 4) [n_grid]
+        Unique IDs of grid points
+    """
+
+    def __init__(self, parameters_random, n_grid=None, options=None, coords=None, coords_norm=None,
+                 coords_gradient=None, coords_gradient_norm=None, coords_id=None, coords_gradient_id=None, gpc=None,
+                 grid_pre=None):
+        """
+        Constructor; Initializes Grid instance; Generates grid or copies provided content
+        """
+        if options is None:
+            options = dict()
+
+        if type(options) is dict:
+
+            if "n_pool" not in options.keys():
+                options["n_pool"] = 1000
+
+            if "seed" not in options.keys():
+                options["seed"] = None
+
+        self.n_pool = options["n_pool"]
+        self.gpc = gpc
+        self.grid_pre = grid_pre
+
+        if type(self.criterion) is not list:
+            self.criterion = [self.criterion]
+
+        super(FIM, self).__init__(parameters_random,
+                                  n_grid=n_grid,
+                                  options=options,
+                                  coords=coords,
+                                  coords_norm=coords_norm,
+                                  coords_gradient=coords_gradient,
+                                  coords_gradient_norm=coords_gradient_norm,
+                                  coords_id=coords_id,
+                                  coords_gradient_id=coords_gradient_id)
+
+        if coords_norm is not None:
+            self.gpc.gpc_matrix = self.gpc.create_gpc_matrix(b=self.gpc.basis.b, x=coords_norm, gradient=False)
+        elif self.grid_pre is not None:
+            self.gpc.gpc_matrix = self.gpc.create_gpc_matrix(b=self.gpc.basis.b, x=self.grid_pre.coords_norm, gradient=False)
+        else:
+            grid_init = Random(parameters_random=self.gpc.problem.parameters_random,
+                               n_grid=1,
+                               options=self.options)
+            self.gpc.gpc_matrix = self.gpc.create_gpc_matrix(b=self.gpc.basis.b, x=grid_init.coords_norm, gradient=False)
+
+        self.coords_norm = self.get_fim_optiomal_grid_points(n_grid_add=self.n_grid)
+
+        # Denormalize grid to original parameter space
+        self.coords = self.get_denormalized_coordinates(self.coords_norm)
+
+        # Generate unique IDs of grid points
+        self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
+
+    def get_fim_optiomal_grid_points(self, n_grid_add):
+        """
+        This function adds grid points (one by one) to the set of points by maximizing the Fisher-information matrix
+        in a D-optimal sense.
+
+        Parameters
+        ----------
+        n_grid_add : int
+            Number of grid points to add
+
+        Returns
+        -------
+        coords_norm : ndarray of float [n_grid x dim]
+            Normalized sample coordinates in range [-1, 1]
+        """
+
+        # coords_norm_opt = np.zeros((n_grid_add, self.dim))
+        #
+        # for i in range(n_grid_add):
+        #     fim_matrix = self.calc_fim_matrix()
+        #     grid_test = Random(parameters_random=self.gpc.problem.parameters_random,
+        #                        n_grid=self.n_pool,
+        #                        options=self.options)
+        #
+        #     det = np.zeros(grid_test.coords_norm.shape[0])
+        #
+        #     for i_c, c in enumerate(grid_test.coords_norm):
+        #         det[i_c] = self.get_det_updated_fim_matrix(fim_matrix=fim_matrix, coords_norm=c)
+        #
+        #     coords_norm_opt[i, :] = grid_test.coords_norm[np.argmax(det), :]
+        #
+        # return coords_norm_opt
+
+        coords_norm_opt = np.zeros((n_grid_add, self.dim))
+        n_cpu = multiprocessing.cpu_count()
+        pool = multiprocessing.Pool(n_cpu)
+
+        for i in range(n_grid_add):
+            fim_matrix = self.calc_fim_matrix()
+            grid_test = Random(parameters_random=self.gpc.problem.parameters_random,
+                               n_grid=self.n_pool,
+                               options=self.options)
+
+            workhorse_partial = partial(workhorse_get_det_updated_fim_matrix(gpc=self.gpc, fim_matrix=fim_matrix))
+            coords_norm_list_chunks = compute_chunks([c for c in grid_test.coords_norm], n_cpu)
+
+            det = pool.map(workhorse_partial, coords_norm_list_chunks)
+            det = np.concatenate(det)
+
+            coords_norm_opt[i, :] = grid_test.coords_norm[np.argmax(det), :]
+
+        return coords_norm_opt
+
+    def calc_fim_matrix(self):
+        """
+        Calculates Fisher-Information matrix based on the present grid.
+
+        Returns
+        -------
+        fim_matrix : ndarray of float [n_basis x n_basis]
+            Fisher information matrix
+        """
+        fim_matrix = np.zeros((self.gpc.shape[1], self.gpc.shape[1]))
+
+        for row in self.gpc.gpc_matrix:
+            fim_matrix += np.outer(row, row)
+
+        return fim_matrix
+
+    def get_det_updated_fim_matrix(self, fim_matrix, coords_norm):
+        """
+        Calculates Fisher-Information matrix based on the present grid and determined determinant.
+
+        Parameters
+        ----------
+        fim_matrix : ndarray of float [n_basis x n_basis]
+            Fisher information matrix
+        coords_norm : ndarray of float [1 x dim]
+            Candidate grid point
+
+        Returns
+        -------
+        det : float
+            Determinant of updated Fisher Information matrix
+        """
+        new_row = self.gpc.create_gpc_matrix(b=self.gpc.basis.b, x=coords_norm, gradient=False)
+        fim_matrix += np.outer(new_row, new_row)
+
+        return np.linalg.det(fim_matrix)
+
+
 class L1_LHS(RandomGrid):
     """
     L1-LHS optimized grid object
@@ -2598,3 +2821,31 @@ def workhorse_iteration(idx_list, gpc, n_grid, criterion, grid_pre=None):
                 np.matmul(psy_pool_norm.T, psy_pool_norm))
 
     return crit, coords_norm_list
+
+
+def workhorse_get_det_updated_fim_matrix(coords_norm_list, fim_matrix, gpc):
+    """
+    Workhorse to determine the determinant of the Fisher Information matrix
+
+    Parameters
+    ----------
+    coords_norm_list : list of ndarray [1 x dim]
+        List containing the grid point candidates
+    fim_matrix : ndarray of float [n_basis x n_basis]
+        Fisher information matrix
+    gpc : GPC object
+        GPC object
+
+    Returns
+    -------
+    det : float
+        Determinant of updated Fisher Information matrix
+    """
+    det = np.zeros(len(coords_norm_list))
+
+    for i_c, c in enumerate(coords_norm_list):
+        new_row = gpc.create_gpc_matrix(b=gpc.basis.b, x=c, gradient=False)
+        fim_matrix += np.outer(new_row, new_row)
+        det[i_c] = np.linalg.det(fim_matrix)
+
+    return det
