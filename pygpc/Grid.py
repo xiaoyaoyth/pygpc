@@ -1014,28 +1014,29 @@ class RandomGrid(Grid):
         """
         Add sample points to already existing LHS samples
 
-        Parameters:
-        ---------
-        array: ndarray[m, n]
-            exsisting LHS samples whith m samples points per n dimensions
+        Parameters
+        ----------
+        array: ndarray of float [m x n]
+            Existing LHS samples with m samples points per n dimensions
         n_extend: int
-            number of new rows of samples needed
-        Return
-        ---------
-            returns a ndarray[m+n_extend, n] containing the existing LHS samples with added new ones
-        """
+            Number of new rows of samples needed
 
+        Returns
+        -------
+        coords_norm : ndarray of float [m + n_extend x n]
+            Existing LHS samples with added new samples
+        """
 
         dim = np.shape(array)[1]
         n_old = np.shape(array)[0]
         n_new = n_old + n_extend
-        a_new = np.zeros([n_new, dim])
+        a_new = np.zeros([n_new, dim]) - 1
         u = np.random.rand(n_new, dim)
         for d in range(dim):
             k = 0
             for j in range(n_new - 1):
-                if not (float(j / n_new) < float(np.sort(array[:, d])[min(j, len(array) - 1)]) < float(
-                        (j + 1) / n_new)) and (float((j + 1) / n_new) <= float(np.sort(array[:, d])[min((j + 2), len(array) - 1)])):
+                if not (float(j / n_new) < float(np.sort(array[:, d])[min(j, len(array) - 1)]) < float((j + 1) / n_new)) \
+                        and (float((j + 1) / n_new) <= float(np.sort(array[:, d])[min((j + 2), len(array) - 1)])):
 
                     k = k + 1
                     if k is np.shape(a_new)[0] + 1:
@@ -1043,7 +1044,10 @@ class RandomGrid(Grid):
                     a_new[k - 1, d] = float((j + u[j, d]) / n_new)
 
             np.random.shuffle(a_new[:, d])
-        a_extend = a_new[np.random.default_rng().choice(n_new, size=n_extend, replace=False), :]
+
+        a_new = a_new[(a_new != -1).all(axis=1), :]
+        a_extend = a_new[np.random.default_rng().choice(a_new.shape[0], size=n_extend, replace=False), :]
+
         return np.insert(array, n_old, a_extend, axis=0)
 
 
@@ -1126,10 +1130,7 @@ class Random(RandomGrid):
         if not grid_present:
 
             # Generate random samples for each random input variable [n_grid x dim]
-            try:
-                self.coords_norm = np.zeros([self.n_grid, self.dim])
-            except ValueError:
-                a=1
+            self.coords_norm = np.zeros([self.n_grid, self.dim])
 
             # in case of seeding, the random grid is constructed element wise (same grid-points when n_grid differs)
             if self.seed:
@@ -1165,10 +1166,7 @@ class Random(RandomGrid):
 
             else:
                 for i_p, p in enumerate(self.parameters_random):
-                    try:
-                        self.parameters_random[p].pdf_type
-                    except AttributeError:
-                        te = 1
+
                     if self.parameters_random[p].pdf_type == "beta":
                         self.coords_norm[:, i_p] = (np.random.beta(self.parameters_random[p].pdf_shape[0],
                                                                    self.parameters_random[p].pdf_shape[1],
@@ -1177,9 +1175,8 @@ class Random(RandomGrid):
                     if self.parameters_random[p].pdf_type in ["norm", "normal"]:
                         resample = True
                         outlier_mask = np.ones(self.n_grid, dtype=bool)
-                        j = 0
+
                         while resample:
-                            # print("Iteration: {}".format(j+1))
                             self.coords_norm[outlier_mask, i_p] = (np.random.normal(loc=0,
                                                                                     scale=1,
                                                                                     size=[np.sum(outlier_mask), 1]))[:, 0]
@@ -1189,8 +1186,6 @@ class Random(RandomGrid):
                                 self.coords_norm[:, i_p] > self.parameters_random[p].x_perc_norm[1])
 
                             resample = outlier_mask.any()
-
-                            j += 1
 
                     if self.parameters_random[p].pdf_type in ["gamma"]:
                         resample = True
@@ -1285,7 +1280,7 @@ class LHS(RandomGrid):
         Constructor; Initializes RandomGrid instance; Generates grid or copies provided content
         """
 
-        self.lhs_reservoir = None
+        self.coords_norm_lhs = None
         self.perc_mask = None
         self.coords_reservoir = None
         self.coords_norm_reservoir = None
@@ -1340,6 +1335,7 @@ class LHS(RandomGrid):
         coords_id : list of UUID objects (version 4) [n_grid]
             Unique IDs of grid points
         """
+
         if n_grid > 0:
             if n_grid == 1:
                 random_grid = Random(parameters_random=self.parameters_random,
@@ -1354,6 +1350,7 @@ class LHS(RandomGrid):
                     n_grid_lhs = self.n_grid + self.grid_pre.n_grid
 
                 self.perc_mask = np.zeros((n_grid_lhs, self.dim)).astype(bool)
+                self.coords_norm_reservoir = np.zeros([n_grid_lhs, self.dim])
 
                 # generate LHS coordinates
                 self.get_lhs_grid()
@@ -1508,38 +1505,38 @@ class LHS(RandomGrid):
         .. [1] McKay, M. D., Beckman, R. J., & Conover, W. J. (2000). A comparison of three methods for selecting
            values of input variables in the analysis of output from a computer code. Technometrics, 42(1), 55-61.
         """
+        n_resample = self.n_grid
+        n_grid_init = self.n_grid
 
-        # create sample points in icdf space using specified criteria
-        if self.criterion[0] is 'corr':
-            self.lhs_reservoir = self.lhs_corr()
-        elif self.criterion[0] is 'maximin' or self.criterion is 'm':
-            self.lhs_reservoir = self.lhs_maximin()
-        elif self.criterion[0] is 'ese':
-            # reservoir_list= []
-            # PhiP_ese_list = []
-            # for i in range(5):
-            #     reservoir_list.append(self.lhs_ese())
-            #     PhiP_ese_list.append(self.PhiP(reservoir_list[i]))
-            # idx_best = np.argmin(PhiP_ese_list)
-            # self.lhs_reservoir = reservoir_list[idx_best]
-            self.lhs_reservoir = self.lhs_ese()
-        else:
-            self.lhs_reservoir = self.lhs_initial()
+        while n_resample > 0:
+            # create sample points in icdf space using specified criteria
+            if self.criterion[0] is 'corr':
+                self.coords_norm_lhs = self.lhs_corr()
+            elif self.criterion[0] is 'maximin' or self.criterion is 'm':
+                self.coords_norm_lhs = self.lhs_maximin()
+            elif self.criterion[0] is 'ese':
+                self.coords_norm_lhs = self.lhs_ese()
+            else:
+                self.coords_norm_lhs = self.lhs_initial()
 
-        # transform sample points from icdf to pdf space
-        for i_p, p in enumerate(self.parameters_random):
-            self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(self.lhs_reservoir[:, i_p])
-            self.perc_mask[:, i_p] = np.logical_and(
-                self.parameters_random[p].pdf_limits_norm[0] < self.coords_norm_reservoir[:, i_p],
-                self.coords_norm_reservoir[:, i_p] < self.parameters_random[p].pdf_limits_norm[1])
+            # transform sample points from icdf to pdf space
+            for i_p, p in enumerate(self.parameters_random):
+                self.coords_norm_reservoir[:, i_p] = self.parameters_random[p].icdf(self.coords_norm_lhs[:, i_p])
+                self.perc_mask[:, i_p] = np.logical_and(
+                    self.parameters_random[p].pdf_limits_norm[0] <= self.coords_norm_reservoir[:, i_p],
+                    self.coords_norm_reservoir[:, i_p] <= self.parameters_random[p].pdf_limits_norm[1])
 
-        # get points all satisfying perc constraints
-        self.perc_mask = self.perc_mask.all(axis=1)
+            # get points all satisfying perc constraints
+            self.perc_mask = self.perc_mask.all(axis=1)
+            n_resample = np.sum(np.logical_not(self.perc_mask))
+            self.n_grid = n_resample
+
+        self.n_grid = n_grid_init
         self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
 
         if self.grid_pre is not None:
             self.coords_norm_reservoir = get_different_rows_from_matrices(self.grid_pre.coords_norm,
-                                                                              self.coords_norm_reservoir)
+                                                                          self.coords_norm_reservoir)
 
         self.coords_norm = self.coords_norm_reservoir[0:self.n_grid, :]
 
@@ -1554,8 +1551,15 @@ class LHS(RandomGrid):
         """
         if self.grid_pre is not None:
             # transform normalized coordinates back to LHS-Space (0, 1)
-            pre_coords_lhs = 1/2*(self.grid_pre.coords_norm + 1)
+            pre_coords_lhs = 1 / 2 * (self.grid_pre.coords_norm + 1)
 
+            if np.sum(self.coords_norm_reservoir) != 0:
+                pre_coords_lhs = np.vstack((pre_coords_lhs, 1/2*(self.coords_norm_reservoir + 1)))
+
+            return self.lhs_extend(pre_coords_lhs, self.n_grid)
+
+        elif np.sum(self.coords_norm_reservoir) != 0:
+            pre_coords_lhs = 1 / 2 * (self.coords_norm_reservoir + 1)
             return self.lhs_extend(pre_coords_lhs, self.n_grid)
 
         else:
