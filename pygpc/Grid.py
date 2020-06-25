@@ -1341,34 +1341,25 @@ class LHS(RandomGrid):
             Unique IDs of grid points
         """
         if n_grid > 0:
-            if self.grid_pre is None:
-                n_grid_lhs = self.n_grid
+            if n_grid == 1:
+                random_grid = Random(parameters_random=self.parameters_random,
+                                     n_grid=self.n_grid,
+                                     options=self.options)
+                self.coords_norm = random_grid.coords_norm
+
             else:
-                n_grid_lhs = self.n_grid + self.grid_pre.n_grid
+                if self.grid_pre is None:
+                    n_grid_lhs = self.n_grid
+                else:
+                    n_grid_lhs = self.n_grid + self.grid_pre.n_grid
 
-            self.coords_reservoir = np.zeros((n_grid_lhs, self.dim))
-            self.coords_norm_reservoir = np.zeros((n_grid_lhs, self.dim))
-            self.perc_mask = np.zeros((n_grid_lhs, self.dim)).astype(bool)
+                self.perc_mask = np.zeros((n_grid_lhs, self.dim)).astype(bool)
 
-            if n_grid < 2:
-                if self.criterion is ['ese']:
-                    self.criterion = ['maximin']
-
-            # Generate random samples for each random input variable [n_grid x dim]
-            self.coords_norm = np.zeros([self.n_grid, self.dim])
-
-            # generate LHS coordinates
-            self.get_lhs_grid()
-
-        else:
-            random_grid = Random(parameters_random=self.parameters_random,
-                                 n_grid=self.n_grid,
-                                 options=self.options)
-            self.coords_norm = random_grid.coords_norm
+                # generate LHS coordinates
+                self.get_lhs_grid()
 
         # Denormalize grid to original parameter space
         self.coords = self.get_denormalized_coordinates(self.coords_norm)
-        self.coords_reservoir = self.get_denormalized_coordinates(self.coords_norm_reservoir)
 
         # Generate unique IDs of grid points
         self.coords_id = [uuid.uuid4() for _ in range(self.n_grid)]
@@ -2093,6 +2084,8 @@ class L1(RandomGrid):
 
         coords_norm = random_pool.coords_norm[index_list, :]
 
+        pool.close()
+
         return coords_norm
 
     def get_optimal_mu_iteration(self, grid_pre):
@@ -2139,6 +2132,8 @@ class L1(RandomGrid):
         crit = np.sum(crit * np.array(self.weights), axis=1)
 
         coords_norm = coords_norm_list[np.argmin(crit)]
+
+        pool.close()
 
         return coords_norm
 
@@ -2314,6 +2309,8 @@ class FIM(RandomGrid):
             self.gpc.gpc_matrix = self.gpc.create_gpc_matrix(b=self.gpc.basis.b, x=self.gpc.grid.coords_norm, gradient=False)
 
             coords_norm_opt[i, :] = coords_opt
+
+        pool.close()
 
         return coords_norm_opt
 
