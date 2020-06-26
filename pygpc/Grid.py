@@ -1569,8 +1569,8 @@ class LHS(RandomGrid):
             # transform normalized coordinates back to LHS-Space (0, 1)
             pre_coords_lhs = 1 / 2 * (self.grid_pre.coords_norm + 1)
 
-            if np.sum(self.coords_norm_reservoir) != 0:
-                pre_coords_lhs = np.vstack((pre_coords_lhs, 1/2*(self.coords_norm_reservoir + 1)))
+            if np.sum(self.coords_norm_reservoir_perced) != 0:
+                pre_coords_lhs = np.vstack((pre_coords_lhs, self.coords_norm_reservoir_perced))
 
             return self.lhs_extend(pre_coords_lhs, self.n_grid)
 
@@ -2002,6 +2002,8 @@ class L1(RandomGrid):
         self.method = options["method"]
         self.criterion = options["criterion"]
         self.grid_pre = grid_pre
+        self.coords_norm_perced = None
+        self.perc_mask = None
 
         if type(self.criterion) is not list:
             self.criterion = [self.criterion]
@@ -2017,12 +2019,28 @@ class L1(RandomGrid):
                                  coords_gradient_id=coords_gradient_id)
 
         self.weights = options["weights"]
+        n_resample = self.n_grid
 
-        if self.method == "greedy" and self.n_grid > 0:
-            self.coords_norm = self.get_optimal_mu_greedy(grid_pre=self.grid_pre)
+        while n_resample > 0:
+            self.perc_mask = np.zeros([self.n_grid, self.dim])
 
-        elif (self.method == 'iteration' or self.method == 'iter') and self.n_grid > 0:
-            self.coords_norm = self.get_optimal_mu_iteration(grid_pre=self.grid_pre)
+            if self.method == "greedy" and self.n_grid > 0:
+                self.coords_norm = self.get_optimal_mu_greedy(grid_pre=self.grid_pre)
+
+            elif (self.method == 'iteration' or self.method == 'iter') and self.n_grid > 0:
+                self.coords_norm = self.get_optimal_mu_iteration(grid_pre=self.grid_pre)
+
+            for i_p, p in enumerate(self.parameters_random):
+                self.perc_mask[:, i_p] = np.logical_and(
+                    self.parameters_random[p].pdf_limits_norm[0] <= self.coords_norm[:, i_p],
+                    self.coords_norm[:, i_p] <= self.parameters_random[p].pdf_limits_norm[1])
+
+            # get points all satisfying perc constraints
+            self.perc_mask = self.perc_mask.all(axis=1)
+            self.coords_norm_perced = self.coords_norm[self.perc_mask]
+            n_resample = np.sum(np.logical_not(self.perc_mask))
+            self.grid_pre = self
+            self.grid_pre.coords_norm = self.coords_norm_perced
 
         # Denormalize grid to original parameter space
         self.coords = self.get_denormalized_coordinates(self.coords_norm)
