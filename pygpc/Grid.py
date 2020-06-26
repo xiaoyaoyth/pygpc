@@ -1030,23 +1030,33 @@ class RandomGrid(Grid):
         dim = np.shape(array)[1]
         n_old = np.shape(array)[0]
         n_new = n_old + n_extend
-        a_new = np.zeros([n_new, dim]) - 1
-        u = np.random.rand(n_new, dim)
-        for d in range(dim):
-            k = 0
-            for j in range(n_new - 1):
-                if not (float(j / n_new) < float(np.sort(array[:, d])[min(j, len(array) - 1)]) < float((j + 1) / n_new)) \
-                        and (float((j + 1) / n_new) <= float(np.sort(array[:, d])[min((j + 2), len(array) - 1)])):
+        i = 1
+        while i > 0:
+            a_new = np.zeros([n_new, dim]) - 1
+            u = np.random.rand(n_new, dim)
 
-                    k = k + 1
-                    if k is np.shape(a_new)[0] + 1:
-                        k = 1
-                    a_new[k - 1, d] = float((j + u[j, d]) / n_new)
+            for d in range(dim):
+                k = 0
+                for j in range(n_new - 1):
+                    if not (float(j / n_new) < float(np.sort(array[:, d])[min(j, len(array) - 1)]) < float((j + 1) / n_new)) \
+                            and (float((j + 1) / n_new) <= float(np.sort(array[:, d])[min((j + 2), len(array) - 1)])):
 
-            np.random.shuffle(a_new[:, d])
+                        k = k + 1
+                        if k is np.shape(a_new)[0] + 1:
+                            k = 1
+                        a_new[k - 1, d] = float((j + u[j, d]) / n_new)
 
-        a_new = a_new[(a_new != -1).all(axis=1), :]
-        a_extend = a_new[np.random.default_rng().choice(a_new.shape[0], size=n_extend, replace=False), :]
+            a_new = a_new[(a_new != -1).all(axis=1), :]
+
+            if n_extend > a_new.shape[0]:
+                i = 1
+                n_new = n_new * 2
+
+            else:
+                i = 0
+                for d in range(dim):
+                    np.random.shuffle(a_new[:, d])
+                a_extend = a_new[np.random.default_rng().choice(a_new.shape[0], size=n_extend, replace=False), :]
 
         return np.insert(array, n_old, a_extend, axis=0)
 
@@ -1287,6 +1297,7 @@ class LHS(RandomGrid):
         self.grid_pre = grid_pre
         self.options = options
         self.criterion = None
+        self.coords_norm_reservoir_perced = None
 
         if type(self.options) is dict:
             if "criterion" in self.options.keys():
@@ -1509,6 +1520,10 @@ class LHS(RandomGrid):
         n_grid_init = self.n_grid
 
         while n_resample > 0:
+
+            #initialize perc_mask
+            self.perc_mask = np.zeros((self.coords_norm_reservoir.shape[0], self.dim)).astype(bool)
+
             # create sample points in icdf space using specified criteria
             if self.criterion[0] is 'corr':
                 self.coords_norm_lhs = self.lhs_corr()
@@ -1528,11 +1543,12 @@ class LHS(RandomGrid):
 
             # get points all satisfying perc constraints
             self.perc_mask = self.perc_mask.all(axis=1)
+            self.coords_norm_reservoir_perced = self.coords_norm_lhs[self.perc_mask]
             n_resample = np.sum(np.logical_not(self.perc_mask))
             self.n_grid = n_resample
 
         self.n_grid = n_grid_init
-        self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask, :]
+        self.coords_norm_reservoir = self.coords_norm_reservoir_perced
 
         if self.grid_pre is not None:
             self.coords_norm_reservoir = get_different_rows_from_matrices(self.grid_pre.coords_norm,
@@ -1558,8 +1574,8 @@ class LHS(RandomGrid):
 
             return self.lhs_extend(pre_coords_lhs, self.n_grid)
 
-        elif np.sum(self.coords_norm_reservoir) != 0:
-            pre_coords_lhs = 1 / 2 * (self.coords_norm_reservoir + 1)
+        elif np.sum(self.coords_norm_reservoir_perced) != 0 and self.coords_norm_reservoir_perced is not None:
+            pre_coords_lhs = self.coords_norm_reservoir_perced
             return self.lhs_extend(pre_coords_lhs, self.n_grid)
 
         else:
