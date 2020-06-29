@@ -1548,7 +1548,7 @@ class LHS(RandomGrid):
             self.n_grid = n_resample
 
         self.n_grid = n_grid_init
-        self.coords_norm_reservoir = self.coords_norm_reservoir_perced
+        self.coords_norm_reservoir = self.coords_norm_reservoir[self.perc_mask]
 
         if self.grid_pre is not None:
             self.coords_norm_reservoir = get_different_rows_from_matrices(self.grid_pre.coords_norm,
